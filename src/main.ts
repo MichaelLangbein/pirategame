@@ -5,8 +5,7 @@
  * - triangle ............... done
  * - buffer ................. done
  * - colored triangle ....... done
- * - instancing
- * - rotation
+ * - instancing ............. done
  *
  */
 
@@ -31,7 +30,13 @@ const shader = device.createShaderModule({
 
     struct VertexInput {
       pos: vec4f,
-      color: vec4f
+      color: vec4f,
+    }
+
+    struct Transform {
+      offset: vec2f,
+      rotation: f32,
+      scale: f32
     }
 
     struct VertexOutput {
@@ -40,15 +45,27 @@ const shader = device.createShaderModule({
     }
 
     @group(0) @binding(0) var<storage, read> vertexInputs: array<VertexInput>;
+    @group(0) @binding(1) var<storage, read> transforms: array<Transform>;
 
 
-    @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    @vertex fn vertex(
+      @builtin(vertex_index) vertexIndex: u32, 
+      @builtin(instance_index) instanceIndex: u32
+    ) -> VertexOutput {
+
       let vertexInput: VertexInput = vertexInputs[vertexIndex];
       let pos = vertexInput.pos;
       let color = vertexInput.color;
+
+      let transform = transforms[instanceIndex];
+      let offset = vec4f(transform.offset, 0, 0);
+      let rotation = transform.rotation;
+      let scl = transform.scale;
+
       var output = VertexOutput();
       output.color = color;
-      output.pos = pos;
+      output.pos = vec4f(pos * scl + offset);
+      
       return output;
     }
 
@@ -93,7 +110,30 @@ const inputBuffer = device.createBuffer({
   size: inputData.byteLength,
 });
 
+const transformData = new Float32Array([
+  // offset
+  0.2, 0.3,
+  // rotation,
+  2.1,
+  // scale
+  2.1,
+
+  // offset
+  -0.2, -0.3,
+  // rotation,
+  1.1,
+  // scale
+  0.5,
+]);
+
+const transformBuffer = device.createBuffer({
+  label: `transformBuffer`,
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  size: transformData.byteLength,
+});
+
 device.queue.writeBuffer(inputBuffer, 0, inputData, 0);
+device.queue.writeBuffer(transformBuffer, 0, transformData, 0);
 
 const bindgroup = device.createBindGroup({
   layout: pipeline.getBindGroupLayout(0),
@@ -101,6 +141,10 @@ const bindgroup = device.createBindGroup({
     {
       binding: 0,
       resource: inputBuffer,
+    },
+    {
+      binding: 1,
+      resource: transformBuffer,
     },
   ],
 });
@@ -118,7 +162,7 @@ const pass = encoder.beginRenderPass({
 });
 pass.setPipeline(pipeline);
 pass.setBindGroup(0, bindgroup);
-pass.draw(3);
+pass.draw(3, 2);
 pass.end();
 
 const commandBuffer = encoder.finish();
