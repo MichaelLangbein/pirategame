@@ -3,7 +3,8 @@
  * =====
  *
  * - triangle ............... done
- * - buffer .....
+ * - buffer ................. done
+ * - colored triangle ....... done
  * - instancing
  * - rotation
  *
@@ -28,16 +29,31 @@ const targetTextureView = context.getCurrentTexture().createView();
 const shader = device.createShaderModule({
   code: /*wgsl*/ `
 
-    @group(0) @binding(0) var<storage, read> buffer: array<f32>; 
-
-    @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
-      let i = vertexIndex * 2;
-      let j = i + 1;
-      return vec4f(buffer[i], buffer[j], 0.0, 1.0);
+    struct VertexInput {
+      pos: vec4f,
+      color: vec4f
     }
 
-    @fragment fn fragment() -> @location(0) vec4f {
-      return vec4f(1, 0, 0, 1);
+    struct VertexOutput {
+      @builtin(position) pos: vec4f,
+      @location(0) color: vec4f,
+    }
+
+    @group(0) @binding(0) var<storage, read> vertexInputs: array<VertexInput>;
+
+
+    @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+      let vertexInput: VertexInput = vertexInputs[vertexIndex];
+      let pos = vertexInput.pos;
+      let color = vertexInput.color;
+      var output = VertexOutput();
+      output.color = color;
+      output.pos = pos;
+      return output;
+    }
+
+    @fragment fn fragment(vOut: VertexOutput) -> @location(0) vec4f {
+      return vOut.color;
     }
   `,
 });
@@ -55,28 +71,36 @@ const pipeline = device.createRenderPipeline({
   },
 });
 
-const bufferData = new Float32Array([
-  // bottom left
-  -0.5, -0.5,
-  // bottom right
-  0.5, -0.5,
-  // top
-  0.0, 0.5,
+const inputData = new Float32Array([
+  // position bottom left
+  -0.5, -0.5, 0, 1,
+  // color bottom left
+  1, 0, 0, 1,
+
+  // position bottom right
+  0.5, -0.5, 0, 1,
+  // color bottom right
+  0, 1, 0, 1,
+
+  // position top
+  0.0, 0.5, 0, 1,
+  // color top
+  0, 0, 1, 1,
 ]);
 
-const buffer = device.createBuffer({
-  usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  size: bufferData.byteLength,
+const inputBuffer = device.createBuffer({
+  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  size: inputData.byteLength,
 });
 
-device.queue.writeBuffer(buffer, 0, bufferData, 0);
+device.queue.writeBuffer(inputBuffer, 0, inputData, 0);
 
 const bindgroup = device.createBindGroup({
   layout: pipeline.getBindGroupLayout(0),
   entries: [
     {
       binding: 0,
-      resource: buffer,
+      resource: inputBuffer,
     },
   ],
 });
