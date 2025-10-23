@@ -6,7 +6,7 @@
  * - buffer ................. done
  * - colored triangle ....... done
  * - instancing ............. done
- *
+ * - animation .............. done
  */
 
 const width = 320;
@@ -149,21 +149,48 @@ const bindgroup = device.createBindGroup({
   ],
 });
 
-const encoder = device.createCommandEncoder();
+let offset1 = 0.0;
+let offset2 = 0.0;
 
-const pass = encoder.beginRenderPass({
-  colorAttachments: [
-    {
-      view: targetTextureView,
-      loadOp: 'load',
-      storeOp: 'store',
-    },
-  ],
-});
-pass.setPipeline(pipeline);
-pass.setBindGroup(0, bindgroup);
-pass.draw(3, 2);
-pass.end();
+function onRender(device: GPUDevice, context: GPUCanvasContext) {
+  offset1 = (offset1 + 0.01) % 2.0;
+  offset2 = (offset2 + 0.01) % 2.0;
 
-const commandBuffer = encoder.finish();
-device.queue.submit([commandBuffer]);
+  const newOffset1Data = new Float32Array([transformData[0] + offset1, transformData[1] + offset1]);
+  device.queue.writeBuffer(transformBuffer, 0, newOffset1Data, 0, newOffset1Data.length);
+
+  const newOffset2Data = new Float32Array([transformData[4] + offset2, transformData[5] + offset2]);
+  device.queue.writeBuffer(transformBuffer, 4 * 4, newOffset2Data, 0, newOffset2Data.length);
+
+  const encoder = device.createCommandEncoder();
+
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        view: context.getCurrentTexture().createView(),
+        clearValue: [0.3, 0.3, 0.3, 1],
+        loadOp: 'clear',
+        storeOp: 'store',
+      },
+    ],
+  });
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindgroup);
+  pass.draw(3, 2);
+  pass.end();
+
+  const commandBuffer = encoder.finish();
+  device.queue.submit([commandBuffer]);
+}
+
+function loop(device: GPUDevice, context: GPUCanvasContext) {
+  const startTime = new Date().getTime();
+
+  onRender(device, context);
+
+  const endTime = new Date().getTime();
+  const timeLeft = 30 - (endTime - startTime);
+  setTimeout(() => loop(device, context), timeLeft);
+}
+
+loop(device, context);
