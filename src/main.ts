@@ -7,6 +7,7 @@
  * - colored triangle ....... done
  * - instancing ............. done
  * - animation .............. done
+ * - rotation matrix ........ done
  */
 
 const width = 320;
@@ -58,13 +59,21 @@ const shader = device.createShaderModule({
       let color = vertexInput.color;
 
       let transform = transforms[instanceIndex];
-      let offset = vec4f(transform.offset, 0, 0);
+      let offset = transform.offset;
       let rotation = transform.rotation;
       let scl = transform.scale;
 
+      // 1. Create 2D rotation matrix
+      let c = cos(rotation);
+      let s = sin(rotation);
+      let rotMatrix = mat2x2f(c, s, -s, c);
+
+      // 2. apply
+      let new_pos_xy = (rotMatrix * pos.xy) * scl + offset;
+
       var output = VertexOutput();
       output.color = color;
-      output.pos = vec4f(pos * scl + offset);
+      output.pos = vec4f(new_pos_xy, 0, 1);
       
       return output;
     }
@@ -114,14 +123,14 @@ const transformData = new Float32Array([
   // offset
   0.2, 0.3,
   // rotation,
-  2.1,
+  0.1,
   // scale
-  2.1,
+  1.1,
 
   // offset
   -0.2, -0.3,
   // rotation,
-  1.1,
+  -0.1,
   // scale
   0.5,
 ]);
@@ -153,8 +162,8 @@ let offset1 = 0.0;
 let offset2 = 0.0;
 
 function onRender(device: GPUDevice, context: GPUCanvasContext) {
-  offset1 = (offset1 + 0.01) % 2.0;
-  offset2 = (offset2 + 0.01) % 2.0;
+  offset1 = (offset1 + 0.01) % 1.0;
+  offset2 = (offset2 + 0.02) % 1.0;
 
   const newOffset1Data = new Float32Array([transformData[0] + offset1, transformData[1] + offset1]);
   device.queue.writeBuffer(transformBuffer, 0, newOffset1Data, 0, newOffset1Data.length);
