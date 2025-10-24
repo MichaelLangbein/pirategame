@@ -8,6 +8,11 @@
  * - instancing ............. done
  * - animation .............. done
  * - rotation matrix ........ done
+ * - quad
+ * - load texture
+ * - display texture
+ * - large canvas, few pixels
+ *
  */
 
 const width = 320;
@@ -29,10 +34,19 @@ const targetTextureView = context.getCurrentTexture().createView();
 const shader = device.createShaderModule({
   code: /*wgsl*/ `
 
-    struct VertexInput {
-      pos: vec4f,
-      color: vec4f,
-    }
+    const POSITIONS = array<vec2<f32>, 4>(
+      vec2(-1.0, -1.0), // Bottom-left
+      vec2( 1.0, -1.0), // Bottom-right
+      vec2(-1.0,  1.0), // Top-left
+      vec2( 1.0,  1.0)  // Top-right
+    );
+
+    const UVS = array<vec2<f32>, 4>(
+      vec2(0.0, 1.0), // Corresponds to Bottom-left pos
+      vec2(1.0, 1.0), // Corresponds to Bottom-right pos
+      vec2(0.0, 0.0), // Corresponds to Top-left pos
+      vec2(1.0, 0.0)  // Corresponds to Top-right pos
+    );
 
     struct Transform {
       offset: vec2f,
@@ -45,8 +59,7 @@ const shader = device.createShaderModule({
       @location(0) color: vec4f,
     }
 
-    @group(0) @binding(0) var<storage, read> vertexInputs: array<VertexInput>;
-    @group(0) @binding(1) var<storage, read> transforms: array<Transform>;
+    @group(0) @binding(0) var<storage, read> transforms: array<Transform>;
 
 
     @vertex fn vertex(
@@ -54,9 +67,10 @@ const shader = device.createShaderModule({
       @builtin(instance_index) instanceIndex: u32
     ) -> VertexOutput {
 
-      let vertexInput: VertexInput = vertexInputs[vertexIndex];
-      let pos = vertexInput.pos;
-      let color = vertexInput.color;
+      let triangleNr: u32 = vertexIndex / 3;
+      let triangleOffset: u32 = vertexIndex % 3; 
+      let pos = POSITIONS[triangleNr + triangleOffset];
+      let uv = UVS[triangleNr + triangleOffset];
 
       let transform = transforms[instanceIndex];
       let offset = transform.offset;
@@ -72,7 +86,7 @@ const shader = device.createShaderModule({
       let new_pos_xy = (rotMatrix * pos.xy) * scl + offset;
 
       var output = VertexOutput();
-      output.color = color;
+      output.color = vec4f(f32(vertexIndex), f32(triangleNr), f32(triangleOffset), 1.);
       output.pos = vec4f(new_pos_xy, 0, 1);
       
       return output;
@@ -97,42 +111,20 @@ const pipeline = device.createRenderPipeline({
   },
 });
 
-const inputData = new Float32Array([
-  // position bottom left
-  -0.5, -0.5, 0, 1,
-  // color bottom left
-  1, 0, 0, 1,
-
-  // position bottom right
-  0.5, -0.5, 0, 1,
-  // color bottom right
-  0, 1, 0, 1,
-
-  // position top
-  0.0, 0.5, 0, 1,
-  // color top
-  0, 0, 1, 1,
-]);
-
-const inputBuffer = device.createBuffer({
-  usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  size: inputData.byteLength,
-});
-
 const transformData = new Float32Array([
   // offset
   0.2, 0.3,
   // rotation,
   0.1,
   // scale
-  1.1,
+  0.5,
 
   // offset
   -0.2, -0.3,
   // rotation,
   -0.1,
   // scale
-  0.5,
+  0.3,
 ]);
 
 const transformBuffer = device.createBuffer({
@@ -141,7 +133,6 @@ const transformBuffer = device.createBuffer({
   size: transformData.byteLength,
 });
 
-device.queue.writeBuffer(inputBuffer, 0, inputData, 0);
 device.queue.writeBuffer(transformBuffer, 0, transformData, 0);
 
 const bindgroup = device.createBindGroup({
@@ -149,27 +140,18 @@ const bindgroup = device.createBindGroup({
   entries: [
     {
       binding: 0,
-      resource: inputBuffer,
-    },
-    {
-      binding: 1,
       resource: transformBuffer,
     },
   ],
 });
 
-let offset1 = 0.0;
-let offset2 = 0.0;
-
 function onRender(device: GPUDevice, context: GPUCanvasContext) {
-  offset1 = (offset1 + 0.01) % 1.0;
-  offset2 = (offset2 + 0.02) % 1.0;
+  transformData[0] = (transformData[0] + 0.001) % 1.0;
+  transformData[1] = (transformData[1] + 0.001) % 1.0;
+  transformData[4] = (transformData[4] + 0.002) % 1.0;
+  transformData[5] = (transformData[5] + 0.002) % 1.0;
 
-  const newOffset1Data = new Float32Array([transformData[0] + offset1, transformData[1] + offset1]);
-  device.queue.writeBuffer(transformBuffer, 0, newOffset1Data, 0, newOffset1Data.length);
-
-  const newOffset2Data = new Float32Array([transformData[4] + offset2, transformData[5] + offset2]);
-  device.queue.writeBuffer(transformBuffer, 4 * 4, newOffset2Data, 0, newOffset2Data.length);
+  device.queue.writeBuffer(transformBuffer, 0, transformData);
 
   const encoder = device.createCommandEncoder();
 
@@ -185,7 +167,7 @@ function onRender(device: GPUDevice, context: GPUCanvasContext) {
   });
   pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindgroup);
-  pass.draw(3, 2);
+  pass.draw(6, 2);
   pass.end();
 
   const commandBuffer = encoder.finish();
