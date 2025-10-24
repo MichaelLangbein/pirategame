@@ -8,7 +8,7 @@
  * - instancing ............. done
  * - animation .............. done
  * - rotation matrix ........ done
- * - quad
+ * - quad ................... done
  * - load texture
  * - display texture
  * - large canvas, few pixels
@@ -21,6 +21,11 @@ const height = 240;
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
 canvas.width = width;
 canvas.height = height;
+
+const shipImgResponse = await fetch('./ship.png');
+const blob = await shipImgResponse.blob();
+const shipBitmap = await createImageBitmap(blob, { resizeHeight: 20, resizeWidth: 20 });
+
 const adapter = await navigator.gpu?.requestAdapter();
 const device = await adapter?.requestDevice();
 if (!device) throw new Error(`No support for WebGPU`);
@@ -28,8 +33,6 @@ const context = canvas.getContext('webgpu');
 if (!context) throw new Error(`No support for WebGPU`);
 const format = navigator.gpu.getPreferredCanvasFormat();
 context?.configure({ device, format });
-
-const targetTextureView = context.getCurrentTexture().createView();
 
 const shader = device.createShaderModule({
   code: /*wgsl*/ `
@@ -56,10 +59,12 @@ const shader = device.createShaderModule({
 
     struct VertexOutput {
       @builtin(position) pos: vec4f,
-      @location(0) color: vec4f,
+      @location(0) uv: vec2f,
     }
 
     @group(0) @binding(0) var<storage, read> transforms: array<Transform>;
+    @group(0) @binding(1) var textureSampler: sampler;
+    @group(0) @binding(2) var texture:texture_2d<f32>;
 
 
     @vertex fn vertex(
@@ -86,14 +91,15 @@ const shader = device.createShaderModule({
       let new_pos_xy = (rotMatrix * pos.xy) * scl + offset;
 
       var output = VertexOutput();
-      output.color = vec4f(f32(vertexIndex), f32(triangleNr), f32(triangleOffset), 1.);
+      output.uv = uv;
       output.pos = vec4f(new_pos_xy, 0, 1);
       
       return output;
     }
 
     @fragment fn fragment(vOut: VertexOutput) -> @location(0) vec4f {
-      return vOut.color;
+      let color = textureSample(texture, textureSampler, vOut.uv);
+      return color;
     }
   `,
 });
@@ -133,7 +139,22 @@ const transformBuffer = device.createBuffer({
   size: transformData.byteLength,
 });
 
+const shipTexture = device.createTexture({
+  format: 'bgra8unorm',
+  size: { width: 20, height: 20, depthOrArrayLayers: 1 },
+  usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+});
+
+const shipTextureView = shipTexture.createView();
+
+const textureSampler = device.createSampler({});
+
 device.queue.writeBuffer(transformBuffer, 0, transformData, 0);
+device.queue.copyExternalImageToTexture(
+  { source: shipBitmap },
+  { texture: shipTexture },
+  { width: 20, height: 20, depthOrArrayLayers: 1 }
+);
 
 const bindgroup = device.createBindGroup({
   layout: pipeline.getBindGroupLayout(0),
@@ -141,6 +162,14 @@ const bindgroup = device.createBindGroup({
     {
       binding: 0,
       resource: transformBuffer,
+    },
+    {
+      binding: 1,
+      resource: textureSampler,
+    },
+    {
+      binding: 2,
+      resource: shipTexture,
     },
   ],
 });
