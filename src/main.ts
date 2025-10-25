@@ -2,15 +2,15 @@
  * TODOs
  * =====
  *
- * - triangle ............... done
- * - buffer ................. done
- * - colored triangle ....... done
- * - instancing ............. done
- * - animation .............. done
- * - rotation matrix ........ done
- * - quad ................... done
- * - load texture
- * - display texture
+ * - triangle .................. done
+ * - buffer .................... done
+ * - colored triangle .......... done
+ * - instancing ................ done
+ * - animation ................. done
+ * - rotation matrix ........... done
+ * - quad ...................... done
+ * - load texture .............. done
+ * - display texture ........... done
  * - large canvas, few pixels
  *
  */
@@ -25,6 +25,7 @@ canvas.height = height;
 const shipImgResponse = await fetch('./ship.png');
 const blob = await shipImgResponse.blob();
 const shipBitmap = await createImageBitmap(blob, { resizeHeight: 20, resizeWidth: 20 });
+console.log(shipBitmap);
 
 const adapter = await navigator.gpu?.requestAdapter();
 const device = await adapter?.requestDevice();
@@ -66,7 +67,6 @@ const shader = device.createShaderModule({
     @group(0) @binding(1) var textureSampler: sampler;
     @group(0) @binding(2) var texture:texture_2d<f32>;
 
-
     @vertex fn vertex(
       @builtin(vertex_index) vertexIndex: u32, 
       @builtin(instance_index) instanceIndex: u32
@@ -82,12 +82,9 @@ const shader = device.createShaderModule({
       let rotation = transform.rotation;
       let scl = transform.scale;
 
-      // 1. Create 2D rotation matrix
       let c = cos(rotation);
       let s = sin(rotation);
       let rotMatrix = mat2x2f(c, s, -s, c);
-
-      // 2. apply
       let new_pos_xy = (rotMatrix * pos.xy) * scl + offset;
 
       var output = VertexOutput();
@@ -140,12 +137,11 @@ const transformBuffer = device.createBuffer({
 });
 
 const shipTexture = device.createTexture({
-  format: 'bgra8unorm',
-  size: { width: 20, height: 20, depthOrArrayLayers: 1 },
-  usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
+  format: 'rgba8unorm',
+  size: { width: 20, height: 20 },
+  usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
-const shipTextureView = shipTexture.createView();
 
 const textureSampler = device.createSampler({});
 
@@ -153,7 +149,7 @@ device.queue.writeBuffer(transformBuffer, 0, transformData, 0);
 device.queue.copyExternalImageToTexture(
   { source: shipBitmap },
   { texture: shipTexture },
-  { width: 20, height: 20, depthOrArrayLayers: 1 }
+  { width: 20, height: 20 }
 );
 
 const bindgroup = device.createBindGroup({
@@ -169,7 +165,7 @@ const bindgroup = device.createBindGroup({
     },
     {
       binding: 2,
-      resource: shipTexture,
+      resource: shipTexture.createView(),
     },
   ],
 });
