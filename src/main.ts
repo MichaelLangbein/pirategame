@@ -11,7 +11,7 @@
  * - quad ...................... done
  * - load texture .............. done
  * - display texture ........... done
- * - large canvas, few pixels
+ * - large canvas, few pixels .. done
  *
  */
 
@@ -25,7 +25,6 @@ canvas.height = height;
 const shipImgResponse = await fetch('./ship.png');
 const blob = await shipImgResponse.blob();
 const shipBitmap = await createImageBitmap(blob, { resizeHeight: 20, resizeWidth: 20 });
-console.log(shipBitmap);
 
 const adapter = await navigator.gpu?.requestAdapter();
 const device = await adapter?.requestDevice();
@@ -143,7 +142,9 @@ const shipTexture = device.createTexture({
 });
 
 
-const textureSampler = device.createSampler({});
+const textureSampler = device.createSampler({
+  magFilter: 'nearest'
+});
 
 device.queue.writeBuffer(transformBuffer, 0, transformData, 0);
 device.queue.copyExternalImageToTexture(
