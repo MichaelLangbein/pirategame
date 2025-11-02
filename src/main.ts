@@ -35,17 +35,28 @@ const waterComputeShader = device.createShaderModule({
         @group(0) @binding(2) var<storage, read_write> v2: array<f32>;
         @group(0) @binding(3) var<storage, read_write> h2: array<f32>;
 
-        const width = 320;
-        const height = 240;
-        const dt = 0.001;
-        const dx = 1.0 / width;
-        const dy = 1.0 / height;
+        struct ImageSize {
+            width: u32,
+            height: u32
+        }
+        struct Deltas {
+            dt: f32, // dt mustn't be much bigger than 0.001 for numerical stability
+            dx: f32,
+            dy: f32
+        }
+        @group(1) @binding(0) var<uniform> imageSize: ImageSize;
+        @group(1) @binding(1) var<uniform> deltas: Deltas;
 
         fn arrayIndex(x: u32, y: u32) -> u32 {
-            return y * width + x;
+            return y * imageSize.width + x;
         }
 
         @compute  @workgroup_size(1) fn comp(@builtin(global_invocation_id) id: vec3u) {
+            
+            let dt = deltas.dt;
+            let dx = deltas.dx;
+            let dy = deltas.dy;
+
             let x = id.x;
             let y = id.y;
             v2[arrayIndex(x, y)] = v1[arrayIndex(x, y)] + dt * ( h1[arrayIndex(x+1,y)] + h1[arrayIndex(x-1,y)] + h1[arrayIndex(x,y+1)] + h1[arrayIndex(x,y-1)] - 4.0 * h1[arrayIndex(x,y)] ) / (dx * dy);
@@ -129,7 +140,33 @@ const bindGroup2 = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0)
 });
 
-
+const imageSizeData = new Uint32Array([width, height]);
+const imageSizeBuffer = device.createBuffer({
+    label: 'imageSizeUniform',
+    size: imageSizeData.byteLength,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+const dt = 0.001;
+const dx = 1.0 / width;
+const dy = 1.0 / height;
+const deltasData = new Float32Array([dt, dx, dy]);
+const deltaBuffer = device.createBuffer({
+    label: 'deltasUniform',
+    size: deltasData.byteLength,
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+});
+device.queue.writeBuffer(imageSizeBuffer, 0, imageSizeData, 0);
+device.queue.writeBuffer(deltaBuffer, 0, deltasData, 0);
+const metaDataBindgroup = device.createBindGroup({
+    layout: pipeline.getBindGroupLayout(1),
+    entries: [{
+        binding: 0,
+        resource: imageSizeBuffer,
+    }, {
+        binding: 1,
+        resource: deltaBuffer
+    }]
+})
 
 
 
@@ -243,11 +280,10 @@ function calc() {
     pass.setPipeline(pipeline);
     if (i % 2 == 0) {
         pass.setBindGroup(0, bindGroup1);
-        pass.setBindGroup(1, bindGroup2);
     } else {
         pass.setBindGroup(0, bindGroup2);
-        pass.setBindGroup(1, bindGroup1);
     }
+    pass.setBindGroup(1, metaDataBindgroup);
     pass.dispatchWorkgroups(width, height);
     pass.end();
     const encoded = encoder.finish();
