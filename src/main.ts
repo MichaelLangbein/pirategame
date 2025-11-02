@@ -70,30 +70,32 @@ const shader = device.createShaderModule({
             let Ytotal = 1.0;
             let dx = Xtotal / 320.0;
             let dy = Ytotal / 240.0;
-            let dt = 0.01;
+            let dt = 0.001;
             let f = 0.523;
             let g = 9.81;
-            let k = 0.01;
+            let k = 0.001;
 
             // getting inputs from constants
-            let H = 1.0;
+            let H = 10.0;
 
             // getting inputs from previous iteration
-            let coord = vec2<i32>(floor(vertexOut.uv * vec2<f32>(textureDimensions(huvTexture))));
+            let coord = vec2<i32>(floor(
+                vertexOut.uv * vec2<f32>(textureDimensions(huvTexture))
+            ));
             let coord_xp = coord + vec2(1, 0);
             let coord_yp = coord + vec2(0, 1);
-            
             let huvSample: vec4f = textureLoad(huvTexture, coord, 0);
             let huvSample_xp: vec4f = textureLoad(huvTexture, coord_xp, 0);
             let huvSample_yp: vec4f = textureLoad(huvTexture, coord_yp, 0);
 
-            let u_xp = huvSample_xp[1];
-            let u = huvSample[1];
-            let v_yp = huvSample_yp[2];
-            let v = huvSample[2];
             let h = huvSample[0];
+            let u = huvSample[1];
+            let v = huvSample[2];
             let h_xp = huvSample_xp[0];
+            let u_xp = huvSample_xp[1];
             let h_yp = huvSample_yp[0];
+            let v_yp = huvSample_yp[2];
+
 
             // shallow water equations
             let h_tp = - H * ((u_xp - u)/dx + (v_yp - v)/dy) * dt + h;
@@ -119,18 +121,18 @@ const pipeline = device.createRenderPipeline({
 
 
 const initialHuvData = new Float32Array(4 * width * height);
-initialHuvData[4 * width * height / 2 + 4 * width / 2] = 10.0;
+initialHuvData[4 * width * height / 2 + 4 * width / 2] = 0.1;
 const huvTexture1 = device.createTexture({
     label: 'huv1',
     format: 'rgba32float',
     size: [width, height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
 });
 const huvTexture2 = device.createTexture({
     label: 'huv2',
     format: 'rgba32float',
     size: [width, height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
 });
 device.queue.writeTexture({texture: huvTexture1}, initialHuvData, {bytesPerRow: 4 * 4 * width}, {width, height});
 device.queue.writeTexture({texture: huvTexture2}, initialHuvData, {bytesPerRow: 4 * 4 * width}, {width, height});
