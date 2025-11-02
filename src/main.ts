@@ -20,9 +20,133 @@ context?.configure({ device, format });
 
 
 
-const shader = device.createShaderModule({
+
+
+
+
+
+
+const waterComputeShader = device.createShaderModule({
+    label: 'water simulation',
+    code: /*wgsl*/`
+    
+        @group(0) @binding(0) var<storage, read> v1: array<f32>;
+        @group(0) @binding(1) var<storage, read> h1: array<f32>;
+        @group(0) @binding(2) var<storage, read_write> v2: array<f32>;
+        @group(0) @binding(3) var<storage, read_write> h2: array<f32>;
+
+        const width = 320;
+        const height = 240;
+        const dt = 0.001;
+        const dx = 1.0 / width;
+        const dy = 1.0 / height;
+
+        fn arrayIndex(x: u32, y: u32) -> u32 {
+            return y * width + x;
+        }
+
+        @compute  @workgroup_size(1) fn comp(@builtin(global_invocation_id) id: vec3u) {
+            let x = id.x;
+            let y = id.y;
+            v2[arrayIndex(x, y)] = v1[arrayIndex(x, y)] + dt * ( h1[arrayIndex(x+1,y)] + h1[arrayIndex(x-1,y)] + h1[arrayIndex(x,y+1)] + h1[arrayIndex(x,y-1)] - 4.0 * h1[arrayIndex(x,y)] ) / (dx * dy);
+            v2[arrayIndex(x, y)] *= 0.99;
+            h2[arrayIndex(x, y)] = h1[arrayIndex(x, y)] + dt * v2[arrayIndex(x, y)];
+        }
+    `
+})
+
+const pipeline = device.createComputePipeline({
+    layout: 'auto',
+    label: 'water simulation',
+    compute: {
+        module: waterComputeShader,
+    }
+});
+
+
+const v = new Float32Array(width * height);
+const h = new Float32Array(width * height);
+h[Math.floor(width * height / 2 + width / 2)] = 0.5;
+
+const vBuffer1 = device.createBuffer({
+    label: 'v1',
+    size: v.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+});
+const hBuffer1 = device.createBuffer({
+    label: 'h1',
+    size: h.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+});
+const vBuffer2 = device.createBuffer({
+    label: 'v2',
+    size: v.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+});
+const hBuffer2 = device.createBuffer({
+    label: 'h2',
+    size: h.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC
+});
+device.queue.writeBuffer(vBuffer1, 0, v, 0);
+device.queue.writeBuffer(hBuffer1, 0, h, 0);
+device.queue.writeBuffer(vBuffer2, 0, v, 0);
+device.queue.writeBuffer(hBuffer2, 0, h, 0);
+
+const bindGroup1 = device.createBindGroup({
+    label: 'water bindgroup1',
+    entries: [{
+        binding: 0,
+        resource: vBuffer1,
+    }, {
+        binding: 1,
+        resource: hBuffer1,
+    }, {
+        binding: 2,
+        resource: vBuffer2,
+    }, {
+        binding: 3,
+        resource: hBuffer2
+    }],
+    layout: pipeline.getBindGroupLayout(0)
+});
+
+const bindGroup2 = device.createBindGroup({
+    label: 'water bindgroup2',
+    entries: [{
+        binding: 0,
+        resource: vBuffer2,
+    }, {
+        binding: 1,
+        resource: hBuffer2,
+    }, {
+        binding: 2,
+        resource: vBuffer1,
+    }, {
+        binding: 3,
+        resource: hBuffer1
+    }],
+    layout: pipeline.getBindGroupLayout(0)
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const displayBufferShader = device.createShaderModule({
+    label: 'display buffer',
     code: /*wgsl*/`
 
+        
         const POSITIONS = array<vec2<f32>, 4>(
             vec2(-1.0, -1.0), // Bottom-left
             vec2( 1.0, -1.0), // Bottom-right
@@ -37,183 +161,124 @@ const shader = device.createShaderModule({
             vec2(1.0, 0.0)  // Top-right pos
         );
 
-        @group(0) @binding(0) var huvTexture: texture_2d<f32>;
-        // @group(0) @binding(1) var bathyTexture: texture_2d<f32>;
+        const WIDTH = 320;
+        const HEIGHT = 240;
 
-    
-        struct VertexOut {
+        struct VertexOutput {
             @builtin(position) pos: vec4f,
-            @location(0) uv: vec2f
-        };
-
-        @vertex fn vert(@builtin(vertex_index) vertexIndex: u32) -> VertexOut {
-            let triangleNr: u32 = vertexIndex / 3;
-            let vertexNr: u32 = vertexIndex % 3;
-            let pos = POSITIONS[triangleNr + vertexNr];
-            let uv = UVS[triangleNr + vertexNr];
-
-            var vo = VertexOut();
-            vo.pos = vec4f(pos, 0, 1);
-            vo.uv = uv;
-            return vo;
+            @location(0) uv: vec2f,
         }
 
-        struct FragmentOut {
-            @location(0) color: vec4f,
-            @location(1) huv: vec4f,
-        };
+        @group(0) @binding(0) var<storage, read> data: array<f32>;
 
-        @fragment fn frag(vertexOut: VertexOut) -> FragmentOut {
+        fn getArrayIndex(x: u32, y: u32) -> u32 {
+            return y * WIDTH + x;
+        }
 
-            // getting inputs from uniforms
-            let Xtotal = 1.0;
-            let Ytotal = 1.0;
-            let dx = Xtotal / 320.0;
-            let dy = Ytotal / 240.0;
-            let dt = 0.001;
-            let f = 0.523;
-            let g = 9.81;
-            let k = 0.001;
+        @vertex fn vertex(
+            @builtin(vertex_index) vertexIndex: u32, 
+            @builtin(instance_index) instanceIndex: u32
+        ) -> VertexOutput {
+      
+            let triangleNr: u32 = vertexIndex / 3;
+            let triangleOffset: u32 = vertexIndex % 3; 
+            let pos = POSITIONS[triangleNr + triangleOffset];
+            let uv = UVS[triangleNr + triangleOffset];
 
-            // getting inputs from constants
-            let H = 10.0;
+            var output = VertexOutput();
+            output.pos = vec4f(pos, 0, 1);
+            output.uv = uv;
+            
+            return output;
+        }
 
-            // getting inputs from previous iteration
-            let coord = vec2<i32>(floor(
-                vertexOut.uv * vec2<f32>(textureDimensions(huvTexture))
-            ));
-            let coord_xp = coord + vec2(1, 0);
-            let coord_yp = coord + vec2(0, 1);
-            let huvSample: vec4f = textureLoad(huvTexture, coord, 0);
-            let huvSample_xp: vec4f = textureLoad(huvTexture, coord_xp, 0);
-            let huvSample_yp: vec4f = textureLoad(huvTexture, coord_yp, 0);
-
-            let h = huvSample[0];
-            let u = huvSample[1];
-            let v = huvSample[2];
-            let h_xp = huvSample_xp[0];
-            let u_xp = huvSample_xp[1];
-            let h_yp = huvSample_yp[0];
-            let v_yp = huvSample_yp[2];
-
-
-            // shallow water equations
-            let h_tp = - H * ((u_xp - u)/dx + (v_yp - v)/dy) * dt + h;
-            let u_tp = (-g * (h_xp - h)/dx - k*u + f*v) * dt + u;
-            let v_tp = (-g * (h_yp - h)/dy - k*v - f*u) * dt + v;
-
-            // output
-            var fragOut = FragmentOut();
-            fragOut.huv = vec4f(h_tp, u_tp, v_tp, 1.0);
-            fragOut.color = vec4f(h_tp, h_tp, h_tp, 1.0);
-            return fragOut;
+        @fragment fn fragment(vOut: VertexOutput) -> @location(0) vec4f {
+            let x = u32(f32(WIDTH) * vOut.uv[0]);
+            let y = u32(f32(HEIGHT) * vOut.uv[1]);
+            let i = getArrayIndex(x, y);
+            let val = data[getArrayIndex(x, y)] * 10.0;
+            return vec4f(val, val, val, 1);
         }
 
     `
 });
 
-const pipeline = device.createRenderPipeline({
+const displayPipeline = device.createRenderPipeline({
     layout: 'auto',
-    vertex: {module: shader, entryPoint: 'vert'},
-    fragment: {module: shader, entryPoint: 'frag', targets: [{format}, {format: 'rgba32float'}]},
+    vertex: {
+        module: displayBufferShader,
+        entryPoint: 'vertex',
+    },
+    fragment: {
+        module: displayBufferShader,
+        entryPoint: 'fragment',
+        targets: [{format}]
+    }
 });
 
-
-
-const initialHuvData = new Float32Array(4 * width * height);
-initialHuvData[4 * width * height / 2 + 4 * width / 2] = 0.1;
-const huvTexture1 = device.createTexture({
-    label: 'huv1',
-    format: 'rgba32float',
-    size: [width, height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
-});
-const huvTexture2 = device.createTexture({
-    label: 'huv2',
-    format: 'rgba32float',
-    size: [width, height],
-    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
-});
-device.queue.writeTexture({texture: huvTexture1}, initialHuvData, {bytesPerRow: 4 * 4 * width}, {width, height});
-device.queue.writeTexture({texture: huvTexture2}, initialHuvData, {bytesPerRow: 4 * 4 * width}, {width, height});
-const bindGroup1 = device.createBindGroup({
-    label: 'bindGroup1',
-    layout: pipeline.getBindGroupLayout(0),
+const displayBindGroup = device.createBindGroup({
+    layout: displayPipeline.getBindGroupLayout(0),
     entries: [{
         binding: 0,
-        resource: huvTexture1
-    }
-    //     binding: 1,
-    //     resource: bathymetryTexture,
-    // }
-    ]
+        resource: hBuffer1
+    }]
 });
-const bindGroup2 = device.createBindGroup({
-    label: 'bindGroup2',
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [{
-        binding: 0,
-        resource: huvTexture2
-    }
-    //     binding: 1,
-    //     resource: bathymetryTexture,
-    // }
-    ]
-});
+
+
+
+
+
+
+
+
+
 
 
 let i = 0;
-function onRender() {
+function calc() {
     i += 1;
-    const encoder = device!.createCommandEncoder({label: 'swe encoder'});
 
+    const encoder = device!.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
     if (i % 2 == 0) {
-        const pass = encoder.beginRenderPass({
-            label: 'swe pass 1->2',
-            colorAttachments: [{
-                loadOp: 'load',
-                storeOp: 'store',
-                view: context!.getCurrentTexture().createView()
-            }, {
-                loadOp: 'load',
-                storeOp: 'store',
-                view: huvTexture2.createView()
-            }]
-        })
-        pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup1);
-        pass.draw(6);
-        pass.end();
+        pass.setBindGroup(1, bindGroup2);
     } else {
-        const pass = encoder.beginRenderPass({
-            label: 'swe pass 2->1',
-            colorAttachments: [{
-                loadOp: 'load',
-                storeOp: 'store',
-                view: context!.getCurrentTexture().createView()
-            }, {
-                loadOp: 'load',
-                storeOp: 'store',
-                view: huvTexture1.createView()
-            }]
-        })
-        pass.setPipeline(pipeline);
         pass.setBindGroup(0, bindGroup2);
-        pass.draw(6);
-        pass.end();
+        pass.setBindGroup(1, bindGroup1);
     }
+    pass.dispatchWorkgroups(width, height);
+    pass.end();
+    const encoded = encoder.finish();
 
-    const encodedPass = encoder.finish({});
-    device!.queue.submit([encodedPass]);
+    const encoder2 = device!.createCommandEncoder();
+    const pass2 = encoder2.beginRenderPass({
+        colorAttachments: [{
+            loadOp: 'load',
+            storeOp: 'store',
+            view: context?.getCurrentTexture().createView(),
+        }],
+    });
+    pass2.setPipeline(displayPipeline);
+    pass2.setBindGroup(0, displayBindGroup);
+    pass2.draw(6);
+    pass2.end();
+    const encoded2 = encoder2.finish();
+
+
+    device?.queue.submit([encoded, encoded2]);
+
 }
 
 function loop() {
     const startTime = new Date().getTime();
 
-    onRender();
+    calc();
 
     const endTime = new Date().getTime();
-    const timeLeft = 30.0 - (endTime - startTime);
+    const timePassed = endTime - startTime;
+    const timeLeft = 30.0 - timePassed;
     setTimeout(loop, timeLeft);
 }
 
