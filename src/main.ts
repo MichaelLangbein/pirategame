@@ -39,7 +39,7 @@ const shader = device.createShaderModule({
 
         @group(0) @binding(0) var huvTexture: texture_2d<f32>;
         // @group(0) @binding(1) var bathyTexture: texture_2d<f32>;
-        @group(0) @binding(2) var textureSampler: sampler;
+
     
         struct VertexOut {
             @builtin(position) pos: vec4f,
@@ -79,9 +79,13 @@ const shader = device.createShaderModule({
             let H = 1.0;
 
             // getting inputs from previous iteration
-            let huvSample: vec4f = textureSample(huvTexture, textureSampler, vertexOut.uv);
-            let huvSample_xp: vec4f = textureSample(huvTexture, textureSampler, vertexOut.uv + vec2f(dx / Xtotal, 0));
-            let huvSample_yp: vec4f = textureSample(huvTexture, textureSampler, vertexOut.uv + vec2f(0, dy / Ytotal));            
+            let coord = vec2<i32>(floor(vertexOut.uv * vec2<f32>(textureDimensions(huvTexture))));
+            let coord_xp = coord + vec2(1, 0);
+            let coord_yp = coord + vec2(0, 1);
+            
+            let huvSample: vec4f = textureLoad(huvTexture, coord, 0);
+            let huvSample_xp: vec4f = textureLoad(huvTexture, coord_xp, 0);
+            let huvSample_yp: vec4f = textureLoad(huvTexture, coord_yp, 0);
 
             let u_xp = huvSample_xp[1];
             let u = huvSample[1];
@@ -114,22 +118,11 @@ const pipeline = device.createRenderPipeline({
 
 
 
-/**
- * 
- None of the supported sample types (UnfilterableFloat) of [Texture "huv1"] match the expected sample types (Float).
- - While validating entries[0] as a Sampled Texture.
-Expected entry layout: {sampleType: TextureSampleType::Float, viewDimension: TextureViewDimension::e2D, multisampled: 0}
- - While validating [BindGroupDescriptor ""bindGroup1""] against [BindGroupLayout (unlabeled)]
- - While calling [Device].CreateBindGroup([BindGroupDescriptor ""bindGroup1""]).
- * 
- */
-
-
 const initialHuvData = new Float32Array(4 * width * height);
 const huvTexture1 = device.createTexture({
     label: 'huv1',
     format: 'rgba32float',
-    size: [width, height, 4],
+    size: [width, height],
     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING,
 });
 const huvTexture2 = device.createTexture({
@@ -140,23 +133,17 @@ const huvTexture2 = device.createTexture({
 });
 device.queue.writeTexture({texture: huvTexture1}, initialHuvData, {bytesPerRow: 4 * 4 * width}, {width, height});
 device.queue.writeTexture({texture: huvTexture2}, initialHuvData, {bytesPerRow: 4 * 4 * width}, {width, height});
-const sampler = device.createSampler({
-    addressModeU: 'clamp-to-edge',
-    addressModeV: 'clamp-to-edge',
-});
 const bindGroup1 = device.createBindGroup({
     label: 'bindGroup1',
     layout: pipeline.getBindGroupLayout(0),
     entries: [{
         binding: 0,
         resource: huvTexture1
-    }, {
+    }
     //     binding: 1,
     //     resource: bathymetryTexture,
-    // }, {
-        binding: 2,
-        resource: sampler
-    }]
+    // }
+    ]
 });
 const bindGroup2 = device.createBindGroup({
     label: 'bindGroup2',
@@ -164,13 +151,11 @@ const bindGroup2 = device.createBindGroup({
     entries: [{
         binding: 0,
         resource: huvTexture2
-    }, {
+    }
     //     binding: 1,
     //     resource: bathymetryTexture,
-    // }, {
-        binding: 2,
-        resource: sampler
-    }]
+    // }
+    ]
 });
 
 
