@@ -119,6 +119,7 @@ const pipeline = device.createRenderPipeline({
 
 
 const initialHuvData = new Float32Array(4 * width * height);
+initialHuvData[4 * width * height / 2 + 4 * width / 2] = 10.0;
 const huvTexture1 = device.createTexture({
     label: 'huv1',
     format: 'rgba32float',
@@ -211,7 +212,7 @@ function loop() {
 
     const endTime = new Date().getTime();
     const timeLeft = 30.0 - (endTime - startTime);
-    if (i < 10) setTimeout(loop, timeLeft);
+    setTimeout(loop, timeLeft);
 }
 
 loop();
