@@ -1,11 +1,9 @@
-
 const width = 320;
 const height = 240;
 
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
 canvas.width = width;
 canvas.height = height;
-
 
 const adapter = await navigator.gpu?.requestAdapter();
 const device = await adapter?.requestDevice();
@@ -15,10 +13,9 @@ if (!context) throw new Error(`No support for WebGPU`);
 const format = navigator.gpu.getPreferredCanvasFormat();
 context.configure({ device, format });
 
-
 const shader = device.createShaderModule({
-    label: 'rayMarcher',
-    code: /*wgsl*/`
+  label: 'rayMarcher',
+  code: /*wgsl*/ `
 
         const POSITIONS = array<vec2<f32>, 4>(
             vec2(-1.0, -1.0), // Bottom-left
@@ -50,8 +47,7 @@ const shader = device.createShaderModule({
         @group(0) @binding(0) var<storage> lightSources: array<LightSource>;
         @group(0) @binding(1) var<uniform> metaData: MetaData;
         @group(0) @binding(2) var textureHeight: texture_2d<f32>;
-        @group(0) @binding(3) var textureDiffuse: texture_2d<vec4<f32>>;
-        @group(0) @binding(4) var textureSampler: sampler;
+        @group(0) @binding(3) var textureDiffuse: texture_2d<f32>;
 
         struct VertexOutput {
             @builtin(position) pos: vec4f,
@@ -74,8 +70,12 @@ const shader = device.createShaderModule({
         }
 
         @fragment fn fragment(vertexOutput: VertexOutput) -> FragmentOutput {
-            let height: f32 = textureSample(textureHeight, textureSampler, vertexOutput.uv);
-            let color: vec4f = textureSample(textureDiffuse, textureSampler, vertexOutput.uv);
+
+            let textureSize = textureDimensions(textureHeight);
+            let coords = vec2<i32>(vertexOutput.uv * vec2<f32>(textureSize));
+
+            let height: f32 = textureLoad(textureHeight, coords, 0).x;
+            let color: vec4f = textureLoad(textureDiffuse, coords, 0);
 
             for (var l: u32 = 0; l < metaData.nrLightSources; l++) {
                 let lightSource = lightSources[l];
@@ -86,117 +86,123 @@ const shader = device.createShaderModule({
 
 
             var fo = FragmentOutput();
-            // fo.color = outputColor;
-            fo.color = vec4(1, 0, 0, 1);
+            fo.color = vec4(height, height, height, 1.0);
+            // fo.color = vec4(1, 0, 0, 1);
             return fo;
         }
-    `
+    `,
 });
 
 const pipeline = device.createRenderPipeline({
-    vertex: {
-        module: shader,
-        entryPoint: `vertex`
-    }, 
-    fragment: {
-        module: shader,
-        entryPoint: `fragment`,
-        targets: [{
-            format
-        }]
-    },
-    layout: 'auto'
+  vertex: {
+    module: shader,
+    entryPoint: `vertex`,
+  },
+  fragment: {
+    module: shader,
+    entryPoint: `fragment`,
+    targets: [
+      {
+        format,
+      },
+    ],
+  },
+  layout: 'auto',
 });
 
-
 const lightSourcesData = new Float32Array([
-    // x y h
-    0.5, 0.5, 1.0,
-    0.25, 0.25, 0.5
+  // x y h
+  0.5, 0.5, 1.0, 0.25, 0.25, 0.5,
 ]);
 const lightSources = device.createBuffer({
-    size: lightSourcesData.byteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+  size: lightSourcesData.byteLength,
+  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
 });
 device.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
 
 const metaDataData = new Uint32Array([
-    // nrLightSources, nrSteps, width, height
-    lightSources.size / 3, 10, width, height
+  // nrLightSources, nrSteps, width, height
+  lightSources.size / 3,
+  10,
+  width,
+  height,
 ]);
 const metaData = device.createBuffer({
-    size: metaDataData.byteLength,
-    usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM
+  size: metaDataData.byteLength,
+  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.UNIFORM,
 });
 device.queue.writeBuffer(metaData, 0, metaDataData, 0);
 
 let textureHeightData = new Float32Array(width * height);
-textureHeightData = textureHeightData.map(d => Math.random());
+textureHeightData = textureHeightData.map((d) => Math.random());
 const textureHeight = device.createTexture({
-    format: 'r32float',
-    size: [width, height],
-    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
+  label: 'heightTexture',
+  format: 'r32float',
+  size: [width, height],
+  usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
 });
-device.queue.writeTexture({texture: textureHeight}, textureHeightData, {bytesPerRow: width * 4}, {width, height});
+device.queue.writeTexture({ texture: textureHeight }, textureHeightData, { bytesPerRow: width * 4 }, { width, height });
 
 let textureDiffuseData = new Float32Array(width * height * 4);
-textureDiffuseData = textureDiffuseData.map(d => Math.random());
+textureDiffuseData = textureDiffuseData.map((_) => Math.random());
 const textureDiffuse = device.createTexture({
-    format: 'rgba32float',
-    size: [width, height, 4],
-    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
+  label: 'diffuseTexture',
+  format: 'rgba32float',
+  size: [width, height],
+  usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING,
 });
-device.queue.writeTexture({texture: textureDiffuse}, textureDiffuseData, {bytesPerRow: width * 4 * 4}, {width, height});
-
-const sampler = device.createSampler({
-    addressModeU: 'clamp-to-edge',
-    addressModeV: 'clamp-to-edge',
-});
+device.queue.writeTexture(
+  { texture: textureDiffuse },
+  textureDiffuseData,
+  { bytesPerRow: width * 4 * 4 },
+  { width, height }
+);
 
 const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-        {binding: 0, resource: lightSources },
-        {binding: 1, resource: metaData },
-        {binding: 2, resource: textureHeight.createView({}) },
-        {binding: 3, resource: textureDiffuse.createView({}) },
-        {binding: 4, resource: sampler },
-    ]
+  label: 'raymarchingBindgroup',
+  layout: pipeline.getBindGroupLayout(0),
+  entries: [
+    { binding: 0, resource: lightSources },
+    { binding: 1, resource: metaData },
+    { binding: 2, resource: textureHeight.createView({}) },
+    { binding: 3, resource: textureDiffuse.createView({}) },
+  ],
 });
 
 let i = 0;
 function render() {
-    i += 1;
+  i += 1;
 
-    lightSourcesData[0] = 0.5 + 0.25 * Math.sin(i / 100);
-    device!.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
+  lightSourcesData[0] = 0.5 + 0.25 * Math.sin(i / 100);
+  device!.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
 
-    const encoder = device!.createCommandEncoder();
-    const pass = encoder.beginRenderPass({
-        colorAttachments: [{
-            loadOp: 'clear',
-            storeOp: 'store',
-            view: context!.getCurrentTexture().createView()
-        }]
-    });
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.draw(6);
-    pass.end();
-    const commands = encoder.finish();
-    device!.queue.submit([commands]);
+  const encoder = device!.createCommandEncoder();
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [
+      {
+        loadOp: 'clear',
+        storeOp: 'store',
+        view: context!.getCurrentTexture().createView(),
+      },
+    ],
+  });
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.draw(6);
+  pass.end();
+  const commands = encoder.finish();
+  device!.queue.submit([commands]);
 }
 
 function loop() {
-    const startTime = new Date().getTime();
+  const startTime = new Date().getTime();
 
-    render();
+  render();
 
-    const endTime = new Date().getTime();
-    const timePassed = endTime - startTime;
-    const timeLeft = 30.0 - timePassed;
-    setTimeout(loop, timeLeft);
+  const endTime = new Date().getTime();
+  const timePassed = endTime - startTime;
+  const timeLeft = 30.0 - timePassed;
+  setTimeout(loop, timeLeft);
 }
 
 loop();
-
