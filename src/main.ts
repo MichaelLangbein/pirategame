@@ -69,25 +69,48 @@ const shader = device.createShaderModule({
             @location(0) color: vec4f
         }
 
+        // some textures cannot be sampled with 'textureSample', for instance r32f or rgba32f.
+        // so we use 'textureLoad' instead.
+        fn myTextureSampler(texture: texture_2d<f32>, uv: vec2f) -> vec4f {
+            let textureSize = textureDimensions(texture);
+            let coords = vec2<i32>(uv * vec2<f32>(textureSize));
+            return textureLoad(texture, coords, 0);
+        }
+
         @fragment fn fragment(vertexOutput: VertexOutput) -> FragmentOutput {
 
-            let textureSize = textureDimensions(textureHeight);
-            let coords = vec2<i32>(vertexOutput.uv * vec2<f32>(textureSize));
+            let height: f32 = myTextureSampler(textureHeight, vertexOutput.uv).x;
+            let color: vec4f = myTextureSampler(textureDiffuse, vertexOutput.uv);
 
-            let height: f32 = textureLoad(textureHeight, coords, 0).x;
-            let color: vec4f = textureLoad(textureDiffuse, coords, 0);
-
+            var lightness = 1.0;
+            let startPoint = vec3f(vertexOutput.uv, height);
             for (var l: u32 = 0; l < metaData.nrLightSources; l++) {
                 let lightSource = lightSources[l];
+                let lightSourcePoint = vec3f(lightSource.x, lightSource.y, lightSource.h);
+                let direction = lightSourcePoint - startPoint;
                 for (var s: u32 = 0; s < metaData.nrSteps; s++) {
-
+                    let samplePoint = startPoint + (f32(s) / f32(metaData.nrSteps)) * direction;
+                    let samplePointHeight = myTextureSampler(textureHeight, samplePoint.xy).x;
+                    if (samplePointHeight > samplePoint.z) {
+                        lightness -= (1.0 / f32(metaData.nrLightSources));
+                        break;
+                    }
                 }
             }
 
 
             var fo = FragmentOutput();
-            fo.color = vec4(height, height, height, 1.0);
-            // fo.color = vec4(1, 0, 0, 1);
+            fo.color = vec4f(color.xyz * lightness, 1.0);
+
+            for (var l: u32 = 0; l < metaData.nrLightSources; l++) {
+                let lightSource = lightSources[l];
+                let lightSourcePoint = vec3f(lightSource.x, lightSource.y, lightSource.h);
+                let direction = lightSourcePoint.xy - startPoint.xy;
+                if (length(direction) < 0.01) {
+                  fo.color = vec4f(0, 0, 1, 1);
+                }
+            }
+
             return fo;
         }
     `,
@@ -112,7 +135,8 @@ const pipeline = device.createRenderPipeline({
 
 const lightSourcesData = new Float32Array([
   // x y h
-  0.5, 0.5, 1.0, 0.25, 0.25, 0.5,
+  0.5, 0.5, 0.5, 
+  0.25, 0.25, 1.5,
 ]);
 const lightSources = device.createBuffer({
   size: lightSourcesData.byteLength,
@@ -122,7 +146,7 @@ device.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
 
 const metaDataData = new Uint32Array([
   // nrLightSources, nrSteps, width, height
-  lightSources.size / 3,
+  lightSourcesData.length / 3,
   10,
   width,
   height,
@@ -134,7 +158,12 @@ const metaData = device.createBuffer({
 device.queue.writeBuffer(metaData, 0, metaDataData, 0);
 
 let textureHeightData = new Float32Array(width * height);
-textureHeightData = textureHeightData.map((d) => Math.random());
+for (let x = 0; x < width; x++) {
+  for (let y = 0; y < height; y++) {
+    const distToPeak = Math.sqrt(Math.pow((x - width/2), 2) + Math.pow((y - 50), 2)) / 100;
+    textureHeightData[width * y + x] = 1.0 - distToPeak;
+  }
+}
 const textureHeight = device.createTexture({
   label: 'heightTexture',
   format: 'r32float',
@@ -144,7 +173,16 @@ const textureHeight = device.createTexture({
 device.queue.writeTexture({ texture: textureHeight }, textureHeightData, { bytesPerRow: width * 4 }, { width, height });
 
 let textureDiffuseData = new Float32Array(width * height * 4);
-textureDiffuseData = textureDiffuseData.map((_) => Math.random());
+for (let y = 0; y < height; y++) {
+  for (let x = 0; x < width; x++) {
+    const i = (width * y + x) * 4;
+    const distToPeak = Math.sqrt(Math.pow((x - width/2), 2) + Math.pow((y - 50), 2)) / 100;
+    textureDiffuseData[i + 0] = 1.0 - distToPeak;
+    textureDiffuseData[i + 1] = distToPeak;
+    textureDiffuseData[i + 2] = 0.0;
+    textureDiffuseData[i + 3] = 1.0;
+  }
+}
 const textureDiffuse = device.createTexture({
   label: 'diffuseTexture',
   format: 'rgba32float',
@@ -173,7 +211,8 @@ let i = 0;
 function render() {
   i += 1;
 
-  lightSourcesData[0] = 0.5 + 0.25 * Math.sin(i / 100);
+  lightSourcesData[0] = 0.5 + 0.5 * Math.sin(i / 100);
+  lightSourcesData[1] = 0.5;
   device!.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
 
   const encoder = device!.createCommandEncoder();
