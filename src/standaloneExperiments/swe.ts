@@ -1,26 +1,17 @@
 import { getWebGpuContext } from './lib/utils';
 
-/**
- * TODO:
- * - Turn ship positions into meters (f32)
- * - Move away from swe, towards springs
- *
- */
-
 /*****************************************************************************
  * Globals
  *****************************************************************************/
 
-const widthPx = 640;
-const heightPx = 480;
-const widthM = 75;
-const heightM = 50;
+const width = 640;
+const height = 480;
 
 const metaData = {
-  width: widthM, // scene width in m
-  height: heightM, // scene height in m
-  deltaX: widthM / widthPx, // = width / nrPixelsWidth
-  deltaY: heightM / heightPx, // = height / nrPixelsHeight
+  width: 75, // scene width in m
+  height: 50, // scene height in m
+  deltaX: 75 / width, // = width / nrPixelsWidth
+  deltaY: 50 / height, // = height / nrPixelsHeight
   deltaT: 0.0001, // should not be much bigger than 0.01
 };
 
@@ -38,8 +29,8 @@ const shipPositions = [
 ];
 
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
-canvas.width = widthPx;
-canvas.height = heightPx;
+canvas.width = width;
+canvas.height = height;
 
 const { device, context, format } = await getWebGpuContext(canvas);
 
@@ -203,14 +194,14 @@ device.queue.writeBuffer(shipPosBuffer, 0, shipPosArray, 0);
 const huvTexture1 = device.createTexture({
   label: 'huvTexture1',
   format: 'rgba32float',
-  size: [widthPx, heightPx],
+  size: [width, height],
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
 const huvTexture2 = device.createTexture({
   label: 'huvTexture2',
   format: 'rgba32float',
-  size: [widthPx, heightPx],
+  size: [width, height],
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
