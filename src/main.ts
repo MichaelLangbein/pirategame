@@ -83,7 +83,7 @@ const shader = device.createShaderModule({
             let color: vec4f = myTextureSampler(textureDiffuse, vertexOutput.uv);
 
             var lightness = 1.0;
-            let startPoint = vec3f(vertexOutput.uv, height);
+            let startPoint = vec3f(vertexOutput.uv, height + 0.01);
             for (var l: u32 = 0; l < metaData.nrLightSources; l++) {
                 let lightSource = lightSources[l];
                 let lightSourcePoint = vec3f(lightSource.x, lightSource.y, lightSource.h);
@@ -147,7 +147,7 @@ device.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
 const metaDataData = new Uint32Array([
   // nrLightSources, nrSteps, width, height
   lightSourcesData.length / 3,
-  100,
+  25,
   width,
   height,
 ]);
