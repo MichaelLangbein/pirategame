@@ -89,9 +89,9 @@ const shader = device.createShaderModule({
                 let lightSourcePoint = vec3f(lightSource.x, lightSource.y, lightSource.h);
                 let direction = lightSourcePoint - startPoint;
                 for (var s: u32 = 0; s < metaData.nrSteps; s++) {
-                    let samplePoint = startPoint + (f32(s) / f32(metaData.nrSteps)) * direction;
-                    let samplePointHeight = myTextureSampler(textureHeight, samplePoint.xy).x;
-                    if (samplePointHeight > samplePoint.z) {
+                    let wayPoint = startPoint + (f32(s) / f32(metaData.nrSteps)) * direction;
+                    let terrainHeight = myTextureSampler(textureHeight, wayPoint.xy).x;
+                    if (terrainHeight > wayPoint.z) {
                         lightness -= (1.0 / f32(metaData.nrLightSources));
                         break;
                     }
@@ -135,8 +135,8 @@ const pipeline = device.createRenderPipeline({
 
 const lightSourcesData = new Float32Array([
   // x y h
-  0.5, 0.5, 0.5, 
-  0.25, 0.25, 1.5,
+  0.5, 0.5, 2.5, 
+  // 0.25, 0.25, 1.5,
 ]);
 const lightSources = device.createBuffer({
   size: lightSourcesData.byteLength,
@@ -147,7 +147,7 @@ device.queue.writeBuffer(lightSources, 0, lightSourcesData, 0);
 const metaDataData = new Uint32Array([
   // nrLightSources, nrSteps, width, height
   lightSourcesData.length / 3,
-  10,
+  100,
   width,
   height,
 ]);
@@ -158,10 +158,18 @@ const metaData = device.createBuffer({
 device.queue.writeBuffer(metaData, 0, metaDataData, 0);
 
 let textureHeightData = new Float32Array(width * height);
+let textureDiffuseData = new Float32Array(width * height * 4);
 for (let x = 0; x < width; x++) {
   for (let y = 0; y < height; y++) {
-    const distToPeak = Math.sqrt(Math.pow((x - width/2), 2) + Math.pow((y - 50), 2)) / 100;
-    textureHeightData[width * y + x] = 1.0 - distToPeak;
+    let height = (Math.sin((x / 25)) + Math.sin((y / 25))) * 0.5 + 0.5;
+    if (x > 100 && x < 120 && y > 100 && y < 120) height = 2.0;
+
+    textureHeightData[width * y + x] = height;
+    const i = (width * y + x) * 4;
+    textureDiffuseData[i + 0] = height * 0.5;
+    textureDiffuseData[i + 1] = 1.0 - height * 0.5;
+    textureDiffuseData[i + 2] = 0.0;
+    textureDiffuseData[i + 3] = 1.0;
   }
 }
 const textureHeight = device.createTexture({
@@ -172,17 +180,6 @@ const textureHeight = device.createTexture({
 });
 device.queue.writeTexture({ texture: textureHeight }, textureHeightData, { bytesPerRow: width * 4 }, { width, height });
 
-let textureDiffuseData = new Float32Array(width * height * 4);
-for (let y = 0; y < height; y++) {
-  for (let x = 0; x < width; x++) {
-    const i = (width * y + x) * 4;
-    const distToPeak = Math.sqrt(Math.pow((x - width/2), 2) + Math.pow((y - 50), 2)) / 100;
-    textureDiffuseData[i + 0] = 1.0 - distToPeak;
-    textureDiffuseData[i + 1] = distToPeak;
-    textureDiffuseData[i + 2] = 0.0;
-    textureDiffuseData[i + 3] = 1.0;
-  }
-}
 const textureDiffuse = device.createTexture({
   label: 'diffuseTexture',
   format: 'rgba32float',
