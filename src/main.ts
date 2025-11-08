@@ -242,7 +242,7 @@ const waterPipeline = device.createRenderPipeline({
   },
 });
 
-const waterBindgroup1 = device.createBindGroup({
+const waterBindGroup1 = device.createBindGroup({
   layout: waterPipeline.getBindGroupLayout(0),
   entries: [
     {
@@ -260,7 +260,7 @@ const waterBindgroup1 = device.createBindGroup({
   ],
 });
 
-const waterBindgroup2 = device.createBindGroup({
+const waterBindGroup2 = device.createBindGroup({
   layout: waterPipeline.getBindGroupLayout(0),
   entries: [
     {
@@ -310,7 +310,7 @@ const shipShader = device.createShaderModule({
 
         struct FragmentOutput {
             @location(0) diffuseColor: vec4f,
-            @location(1) heightMap: f32 
+            @location(1) heightMap: f32
         }
 
         const POSITIONS = array<vec2<f32>, 4>(
@@ -332,7 +332,6 @@ const shipShader = device.createShaderModule({
         @group(0) @binding(2) var vhTexture: texture_2d<f32>;
         @group(0) @binding(3) var shipTexture: texture_2d<f32>;
         @group(0) @binding(4) var shipHeightTexture: texture_2d<f32>;
-        @group(0) @binding(5) var textureSampler: sampler;
 
         fn worldCoordsToUv(worldCoords: vec2f) -> vec2f {
           return vec2f(
@@ -343,7 +342,12 @@ const shipShader = device.createShaderModule({
 
         // some textures cannot be sampled with 'textureSample', for instance r32f or rgba32f.
         // so we use 'textureLoad' instead.
-        fn myTextureSampler(texture: texture_2d<f32>, uv: vec2f) -> vec4f {
+        fn myTextureSampler_f32(texture: texture_2d<f32>, uv: vec2f) -> vec4f {
+            let textureSize = textureDimensions(texture);
+            let coords = vec2<i32>(uv * vec2<f32>(textureSize));
+            return textureLoad(texture, coords, 0);
+        }
+        fn myTextureSampler_u32(texture: texture_2d<u32>, uv: vec2f) -> vec4<u32> {
             let textureSize = textureDimensions(texture);
             let coords = vec2<i32>(uv * vec2<f32>(textureSize));
             return textureLoad(texture, coords, 0);
@@ -356,14 +360,14 @@ const shipShader = device.createShaderModule({
             let uv = UVS[triangleNr + triangleOffset];
 
             let shipPos = shipPositions[instanceIndex];
-            let transformMatrix = mat3f(
+            let transformMatrix = mat3x3<f32>(
               cos(shipPos.rotation), sin(shipPos.rotation), shipPos.xM,
               - sin(shipPos.rotation), cos(shipPos.rotation), shipPos.yM,
               0, 0, 1
             );
-            let worldToSceneMatrix = mat3f(
-              metaData.deltaX / metaData.widthM, 0, 0,
-              0, metaData.deltaY / metaData.heightM, 0,
+            let worldToSceneMatrix = mat3x3<f32>(
+              50.0 * metaData.deltaX / metaData.widthM, 0, 0,
+              0, 50.0 * metaData.deltaY / metaData.heightM, 0,
               0, 0, 1
             );
             let posProjected = worldToSceneMatrix * transformMatrix * vec3f(pos, 1);
@@ -375,12 +379,13 @@ const shipShader = device.createShaderModule({
         }
 
         @fragment fn fragment(vo: VertexOutput) -> FragmentOutput {
-            let shipColor = textureSample(shipTexture, textureSampler, vo.uv);
-            let shipHeight = textureSample(shipHeightTexture, textureSampler, vo.uv);
-            let waterHeight = myTextureSampler(vhTexture, vo.uv).y;
-            fo = FragmentOutput();
+            let shipColor = myTextureSampler_f32(shipTexture, vo.uv);
+            let shipHeight = myTextureSampler_f32(shipHeightTexture, vo.uv).x;
+            let waterHeight = myTextureSampler_f32(vhTexture, vo.uv).y;
+            var fo = FragmentOutput();
             fo.diffuseColor = shipColor;
             fo.heightMap = waterHeight + shipHeight;
+            // fo.diffuseColor = vec4f(1, 0, 0, 1);
             return fo;
         }
 
@@ -388,14 +393,34 @@ const shipShader = device.createShaderModule({
 });
 
 
-/*
-@group(0) @binding(0) var<uniform> metaData: MetaData;
-@group(0) @binding(1) var<storage, read> shipPositions: array<ShipPosition>;
-@group(0) @binding(2) var vhTexture: texture_2d<f32>;
-@group(0) @binding(3) var shipTexture: texture_2d<f32>;
-@group(0) @binding(4) var shipHeightTexture: texture_2d<f32>;
-@group(0) @binding(5) var textureSampler: sampler;
-*/
+
+const shipImgResponse = await fetch('./ship.png');
+const blob = await shipImgResponse.blob();
+const shipBitmap = await createImageBitmap(blob, { resizeHeight: 100, resizeWidth: 100 });
+const shipTexture = device.createTexture({
+  label: 'shipTexture',
+  format: 'rgba8unorm',
+  size: [100, 100],
+  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+});
+device.queue.copyExternalImageToTexture({source: shipBitmap}, {texture: shipTexture}, {width: 100, height: 100});
+
+const shipHeightImgResponse = await fetch('./shipHeight.png');
+const heightBlob = await shipHeightImgResponse.blob();
+const shipHeightBitmap = await createImageBitmap(heightBlob, { resizeHeight: 100, resizeWidth: 100 });
+const shipHeightTexture = device.createTexture({
+  label: 'shipHeightTexture',
+  format: 'rgba8unorm',
+  size: [100, 100],
+  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+});
+device.queue.copyExternalImageToTexture({source: shipHeightBitmap}, {texture: shipHeightTexture}, {width: 100, height: 100});
+
+const waterAndShipHeightTexture = device.createTexture({
+  format: 'r32float',
+  size: [widthPx, heightPx],
+  usage: GPUTextureUsage.RENDER_ATTACHMENT
+});
 
 const shipPipeline = device.createRenderPipeline({
   layout: 'auto',
@@ -408,13 +433,13 @@ const shipPipeline = device.createRenderPipeline({
     targets: [{
       format
     }, {
-      waterAndShipHeightTexture.format
+      format: waterAndShipHeightTexture.format
     }]
   }
 });
 
-const shipBindGroup = device.createBindGroup({
-  label: 'shipBindGroup', 
+const shipBindGroup1 = device.createBindGroup({
+  label: 'shipBindGroup1', 
   layout: shipPipeline.getBindGroupLayout(0),
   entries: [{
     binding: 0,
@@ -427,10 +452,25 @@ const shipBindGroup = device.createBindGroup({
     binding: 3, resource: shipTexture.createView(),
   }, {
     binding: 4, resource: shipHeightTexture.createView(),
-  }, {
-    binding: 5, resource: textureSampler
   }]
-})
+});
+
+const shipBindGroup2 = device.createBindGroup({
+  label: 'shipBindGroup2', 
+  layout: shipPipeline.getBindGroupLayout(0),
+  entries: [{
+    binding: 0,
+    resource: metaDataBuffer
+  }, {
+    binding: 1, resource: shipPosBuffer
+  }, {
+    binding: 2, resource: vhTexture2.createView(),
+  }, {
+    binding: 3, resource: shipTexture.createView(),
+  }, {
+    binding: 4, resource: shipHeightTexture.createView(),
+  }]
+});
 
 /*****************************************************************************
  * Render loop
@@ -451,7 +491,7 @@ function render() {
       {
         loadOp: 'clear',
         storeOp: 'store',
-        view: diffuseTexture.createView(), // context.getCurrentTexture().createView()
+        view: context.getCurrentTexture().createView()
       },
       {
         loadOp: 'load',
@@ -461,7 +501,7 @@ function render() {
     ],
   });
   pass.setPipeline(waterPipeline);
-  pass.setBindGroup(0, i % 2 === 0 ? waterBindgroup1 : waterBindgroup2);
+  pass.setBindGroup(0, i % 2 === 0 ? waterBindGroup1 : waterBindGroup2);
   pass.draw(6);
   pass.end();
   const command = encoder.finish();
@@ -472,13 +512,17 @@ function render() {
   const encoder2 = device.createCommandEncoder();
   const pass2 = encoder2.beginRenderPass({
     colorAttachments: [{
-      loadOp: 'clear', storeOp: 'store', view: context.getCurrentTexture().createView()
+      loadOp: 'clear', 
+      storeOp: 'store', 
+      view: context.getCurrentTexture().createView()
     }, {
-      loadOp: 'load', storeOp: 'store', view: waterAndShipHeightTexture.createView()
+      loadOp: 'load', 
+      storeOp: 'store', 
+      view: waterAndShipHeightTexture.createView()
     }]
   });
   pass2.setPipeline(shipPipeline);
-  pass2.setBindGroup(0, shipBindGroup);
+  pass2.setBindGroup(0, i % 2 === 0 ? shipBindGroup2 : shipBindGroup1);
   pass2.draw(6, metaData.shipCount);
   pass2.end();
   const command2 = encoder2.finish();

@@ -14,6 +14,10 @@
 # Textures
 
 - Not all textures can be read by a sampler
-- A sampler really only serves to facilitate between pixel interpolation (with hardware acceleration)
-- Some texture formats (like r32f and rgba32f) cannot be accessed with a sampler
-- For those, use `textureLoad` instead of `textureSample`
+  - A sampler really only serves to facilitate between pixel interpolation (with hardware acceleration)
+  - Some texture formats (like r32f and rgba32f, but also rgba8u) cannot be accessed with a sampler
+  - For those, use `textureLoad` instead of `textureSample`
+- Another issue is that webgpu doesn't know u8 datatypes
+  - you can create a rgba8u texture ... but that will automatically get converted to a `texture_2d<u32>` texture.
+  - Note that also rgba8u cannot be read with textureSample, only with textureLoad
+  - But webgpu tries to make every integer texture you load from a blob into an `rgba8unorm` anyway
