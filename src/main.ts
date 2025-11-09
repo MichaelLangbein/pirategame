@@ -253,7 +253,15 @@ const vhTexture2 = device.createTexture({
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
+const waterDiffuseTexture = device.createTexture({
+  label: `waterDiffuseTexture`,
+  format: `bgra8unorm`,
+  size: [widthPx, heightPx],
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+});
+
 const waterPipeline = device.createRenderPipeline({
+  label: `waterPipeline`,
   layout: 'auto',
   vertex: {
     module: waterShader,
@@ -263,7 +271,7 @@ const waterPipeline = device.createRenderPipeline({
     module: waterShader,
     targets: [
       {
-        format,
+        format: waterDiffuseTexture.format,
       },
       {
         format: vhTexture1.format,
@@ -507,7 +515,15 @@ const waterAndShipHeightTexture = device.createTexture({
   usage: GPUTextureUsage.RENDER_ATTACHMENT
 });
 
+const waterAndShipDiffuseTexture = device.createTexture({
+  label: `waterAndShipDiffuseTexture`,
+  format: `bgra8unorm`,
+  size: [widthPx, heightPx],
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+});
+
 const shipPipeline = device.createRenderPipeline({
+  label: `shipsPipeline`,
   layout: 'auto',
   vertex: {
     module: shipShader,
@@ -516,7 +532,7 @@ const shipPipeline = device.createRenderPipeline({
   fragment: {
     module: shipShader,
     targets: [{
-      format
+      format: waterAndShipDiffuseTexture.format
     }, {
       format: waterAndShipHeightTexture.format
     }]
@@ -561,9 +577,6 @@ const shipBindGroup2 = device.createBindGroup({
     binding: 5, resource: shipHeightTexture.createView(),
   }]
 });
-
-
-
 
 
 
@@ -621,8 +634,8 @@ const rayMarchShader = device.createShaderModule({
 
         @group(0) @binding(0) var<uniform> metaDataFloats: MetaDataFloats;
         @group(0) @binding(1) var<uniform> metaDataInts: MetaDataInts;
-        @group(0) @binding(2) var textureHeight: texture_2d<f32>;
-        @group(0) @binding(3) var textureDiffuse: texture_2d<f32>;
+        @group(0) @binding(2) var vhTexture: texture_2d<f32>;
+        @group(0) @binding(3) var diffuseTexture: texture_2d<f32>;
         @group(0) @binding(4) var<storage> lightSources: array<Light>;
 
         // some textures cannot be sampled with 'textureSample', for instance r32f or rgba32f.
@@ -646,8 +659,8 @@ const rayMarchShader = device.createShaderModule({
 
         @fragment fn fragment(vo: VertexOutput) -> FragmentOutput {
 
-            let height: f32 = myTextureSampler(textureHeight, vo.uv).x;
-            let color: vec4f = myTextureSampler(textureDiffuse, vo.uv);
+            let height: f32 = myTextureSampler(vhTexture, vo.uv).y;
+            let color: vec4f = myTextureSampler(diffuseTexture, vo.uv);
 
             var lightness = 1.0;
             let startPoint = vec3f(vo.uv, height + 0.01);
@@ -657,7 +670,7 @@ const rayMarchShader = device.createShaderModule({
                 let direction = lightSourcePoint - startPoint;
                 for (var s: u32 = 0; s < metaDataInts.rayMarcherSteps; s++) {
                     let wayPoint = startPoint + (f32(s) / f32(metaDataInts.rayMarcherSteps)) * direction;
-                    let terrainHeight = myTextureSampler(textureHeight, wayPoint.xy).x;
+                    let terrainHeight = myTextureSampler(vhTexture, wayPoint.xy).y;
                     if (terrainHeight > wayPoint.z) {
                         lightness -= (1.0 / f32(metaDataInts.lightSourcesCount));
                         break;
@@ -665,13 +678,14 @@ const rayMarchShader = device.createShaderModule({
                 }
             }
 
-
             var fo = FragmentOutput();
             fo.color = vec4f(color.xyz * lightness, 1.0);
+            fo.color = vec4f(lightness,lightness,lightness,1.0);
+            fo.color = color;
 
             for (var l: u32 = 0; l < metaDataInts.lightSourcesCount; l++) {
                 let lightSource = lightSources[l];
-                let lightSourcePoint = vec3f(lightSource.xM, lightSource.yM, lightSource.h);
+                let lightSourcePoint = vec3f(lightSource.xM / metaDataFloats.widthM, lightSource.yM / metaDataFloats.heightM, lightSource.h);
                 let direction = lightSourcePoint.xy - startPoint.xy;
                 if (length(direction) < 0.01) {
                   fo.color = vec4f(0, 0, 1, 1);
@@ -680,9 +694,69 @@ const rayMarchShader = device.createShaderModule({
 
             return fo;
         }
-
   `
 });
+
+const rayMarcherPipeline = device.createRenderPipeline({
+  label: `rayMarcherPipeline`,
+  layout: 'auto',
+  vertex: {
+    module: rayMarchShader,
+    entryPoint: `vertex`
+  },
+  fragment: {
+    module: rayMarchShader,
+    entryPoint: `fragment`,
+    targets: [{
+      format
+    }]
+  }
+});
+
+const lightSourcesArray = new Float32Array([
+  lights[0].xM, lights[0].yM, lights[0].h
+]);
+const lightSourcesBuffer = device.createBuffer({
+  label: `lightSourcesBuffer`,
+  size: lightSourcesArray.byteLength,
+  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
+});
+device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
+
+
+const rayMarcherBindGroup1 = device.createBindGroup({
+  label: `rayMarcherBindGroup1`,
+  layout: rayMarcherPipeline.getBindGroupLayout(0),
+  entries: [{
+    binding: 0, resource: metaDataFloatsBuffer
+  }, {
+    binding: 1, resource: metaDataIntsBuffer
+  }, {
+    binding: 2, resource: vhTexture1.createView(),
+  }, {
+    binding: 3, resource: waterAndShipDiffuseTexture.createView(),
+  }, {
+    binding: 4, resource: lightSourcesBuffer
+  }]
+});
+
+
+const rayMarcherBindGroup2 = device.createBindGroup({
+  label: `rayMarcherBindGroup2`,
+  layout: rayMarcherPipeline.getBindGroupLayout(0),
+  entries: [{
+    binding: 0, resource: metaDataFloatsBuffer
+  }, {
+    binding: 1, resource: metaDataIntsBuffer
+  }, {
+    binding: 2, resource: vhTexture2.createView(),
+  }, {
+    binding: 3, resource: waterAndShipDiffuseTexture.createView(),
+  }, {
+    binding: 4, resource: lightSourcesBuffer
+  }]
+});
+
 
 
 /*****************************************************************************
@@ -693,18 +767,24 @@ let i = 0;
 function render() {
   i += 1;
 
+  // updating buffers
+
   shipPosArray[0] = 0.5 * widthM * Math.cos(i / 100) + widthM / 2;
   device.queue.writeBuffer(shipPosBuffer, 0, shipPosArray, 0);
+  lightSourcesArray[0] = 0.5 * widthM + Math.cos(i / 100) * widthM / 8;
+  lightSourcesArray[1] = 0.5 * heightM + Math.sin(i / 100) * heightM / 8;
+  device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
 
   // water rendering
 
   const encoder = device.createCommandEncoder();
   const pass = encoder.beginRenderPass({
+    label: `waterRenderPass`,
     colorAttachments: [
       {
         loadOp: 'clear',
         storeOp: 'store',
-        view: context.getCurrentTexture().createView()
+        view: waterDiffuseTexture.createView()
       },
       {
         loadOp: 'load',
@@ -724,10 +804,11 @@ function render() {
 
   const encoder2 = device.createCommandEncoder();
   const pass2 = encoder2.beginRenderPass({
+    label: `shipsRenderPass`,
     colorAttachments: [{
-      loadOp: 'load',
+      loadOp: 'clear',
       storeOp: 'store',
-      view: context.getCurrentTexture().createView()
+      view: waterAndShipDiffuseTexture.createView()
     }, {
       loadOp: 'load',
       storeOp: 'store',
@@ -740,7 +821,24 @@ function render() {
   pass2.end();
   const command2 = encoder2.finish();
 
-  device.queue.submit([command, command2]);
+
+  // light rendering
+
+  const encoder3 = device.createCommandEncoder();
+  const pass3 = encoder3.beginRenderPass({
+    colorAttachments: [{
+      loadOp: 'clear',
+      storeOp: 'store',
+      view: context.getCurrentTexture().createView()
+    }]
+  });
+  pass3.setPipeline(rayMarcherPipeline);
+  pass3.setBindGroup(0, i % 2 === 0 ? rayMarcherBindGroup2 : rayMarcherBindGroup1);
+  pass3.draw(6);
+  pass3.end();
+  const command3 = encoder3.finish();
+
+  device.queue.submit([command, command2, command3]);
 }
 
 function loop() {
