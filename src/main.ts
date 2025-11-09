@@ -29,7 +29,7 @@ const ships = [
 const lights = [{
   xM: widthM / 2,
   yM: heightM / 2,
-  h: 100
+  h: 1.0
 }];
 
 const metaDataFloats = {
@@ -512,7 +512,7 @@ device.queue.copyExternalImageToTexture({ source: shipHeightBitmap }, { texture:
 const waterAndShipHeightTexture = device.createTexture({
   format: 'r32float',
   size: [widthPx, heightPx],
-  usage: GPUTextureUsage.RENDER_ATTACHMENT
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
 });
 
 const waterAndShipDiffuseTexture = device.createTexture({
@@ -723,33 +723,15 @@ const lightSourcesBuffer = device.createBuffer({
 });
 device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
 
-
-const rayMarcherBindGroup1 = device.createBindGroup({
-  label: `rayMarcherBindGroup1`,
+const rayMarcherBindGroup = device.createBindGroup({
+  label: `rayMarcherBindGroup`,
   layout: rayMarcherPipeline.getBindGroupLayout(0),
   entries: [{
     binding: 0, resource: metaDataFloatsBuffer
   }, {
     binding: 1, resource: metaDataIntsBuffer
   }, {
-    binding: 2, resource: vhTexture1.createView(),
-  }, {
-    binding: 3, resource: waterAndShipDiffuseTexture.createView(),
-  }, {
-    binding: 4, resource: lightSourcesBuffer
-  }]
-});
-
-
-const rayMarcherBindGroup2 = device.createBindGroup({
-  label: `rayMarcherBindGroup2`,
-  layout: rayMarcherPipeline.getBindGroupLayout(0),
-  entries: [{
-    binding: 0, resource: metaDataFloatsBuffer
-  }, {
-    binding: 1, resource: metaDataIntsBuffer
-  }, {
-    binding: 2, resource: vhTexture2.createView(),
+    binding: 2, resource: waterAndShipHeightTexture.createView(),
   }, {
     binding: 3, resource: waterAndShipDiffuseTexture.createView(),
   }, {
@@ -784,7 +766,7 @@ function render() {
       {
         loadOp: 'clear',
         storeOp: 'store',
-        view: waterDiffuseTexture.createView()
+        view: waterAndShipDiffuseTexture.createView()
       },
       {
         loadOp: 'load',
@@ -806,7 +788,7 @@ function render() {
   const pass2 = encoder2.beginRenderPass({
     label: `shipsRenderPass`,
     colorAttachments: [{
-      loadOp: 'clear',
+      loadOp: 'load',
       storeOp: 'store',
       view: waterAndShipDiffuseTexture.createView()
     }, {
@@ -833,7 +815,7 @@ function render() {
     }]
   });
   pass3.setPipeline(rayMarcherPipeline);
-  pass3.setBindGroup(0, i % 2 === 0 ? rayMarcherBindGroup2 : rayMarcherBindGroup1);
+  pass3.setBindGroup(0, rayMarcherBindGroup);
   pass3.draw(6);
   pass3.end();
   const command3 = encoder3.finish();
