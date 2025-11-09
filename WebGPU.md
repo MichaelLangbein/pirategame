@@ -1,17 +1,20 @@
-# Storage buffers vs uniform buffers
+# WebGPU
+
+Some details I've learned
+
+## Storage buffers vs uniform buffers
 
 - uniform buffers are read only
 - uniform buffers must be fixed size, cannot be `array`
 - storage buffers can be much larger
 - uniform buffers are faster for ...
 
-# Instancing
+## Instancing
 
 - active by default
 - simply add `draw(<vertexCount>, <instanceCount>)`
--
 
-# Textures
+## Textures
 
 - Not all textures can be read by a sampler
   - A sampler really only serves to facilitate between pixel interpolation (with hardware acceleration)
@@ -20,4 +23,4 @@
 - Another issue is that webgpu doesn't know u8 datatypes
   - you can create a rgba8u texture ... but that will automatically get converted to a `texture_2d<u32>` texture.
   - Note that also rgba8u cannot be read with textureSample, only with textureLoad
-  - But webgpu tries to make every integer texture you load from a blob into an `rgba8unorm` anyway
+  - Note also that `copyExternalImageToTexture` expects the target to be `rgba8unorm` (emphasis on the _norm_) anyway ... which means that you actually do need a `texture_2d<f32>`

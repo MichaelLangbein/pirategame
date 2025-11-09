@@ -14,16 +14,18 @@ const widthM = 75;
 const heightM = 50;
 
 
-const shipPositions = [
+const ships = [
   {
     xM: widthM / 2,
     yM: heightM / 2,
-    rotation: 0.0,
+    rotationRad: 0.0,
+    scaleClip: 0.15,
   },
   {
-    xM: widthM / 4,
+    xM: 3 * widthM / 4,
     yM: heightM / 4,
-    rotation: Math.PI,
+    rotationRad: Math.PI / 4,
+    scaleClip: 0.1,
   },
 ];
 
@@ -33,7 +35,7 @@ const metaData = {
   deltaX: widthM / widthPx, // = width / nrPixelsWidth
   deltaY: heightM / heightPx, // = height / nrPixelsHeight
   deltaT: 0.05, // should not be much bigger than 0.01
-  shipCount: shipPositions.length
+  shipCount: ships.length
 };
 
 
@@ -60,10 +62,11 @@ const waterShader = device.createShaderModule({
             shipCount: f32  // only a float for consistency
         }
 
-        struct ShipPosition {
+        struct Ship {
             xM: f32,
             yM: f32,
-            rotation: f32
+            rotationRad: f32,
+            scaleClip: f32
         }
 
         struct VertexOutput {
@@ -91,7 +94,7 @@ const waterShader = device.createShaderModule({
         );
 
         @group(0) @binding(0) var<uniform> metaData: MetaData;
-        @group(0) @binding(1) var<storage, read> shipPositions: array<ShipPosition>;
+        @group(0) @binding(1) var<storage, read> shipPositions: array<Ship>;
         @group(0) @binding(2) var vhTexture: texture_2d<f32>;
 
         fn worldCoordsToUv(worldCoords: vec2f) -> vec2f {
@@ -195,12 +198,14 @@ const metaDataBuffer = device.createBuffer({
 device.queue.writeBuffer(metaDataBuffer, 0, metaDataArray, 0);
 
 const shipPosArray = new Float32Array([
-  shipPositions[0].xM,
-  shipPositions[0].yM,
-  shipPositions[0].rotation,
-  shipPositions[1].xM,
-  shipPositions[1].yM,
-  shipPositions[1].rotation,
+  ships[0].xM,
+  ships[0].yM,
+  ships[0].rotationRad,
+  ships[0].scaleClip,
+  ships[1].xM,
+  ships[1].yM,
+  ships[1].rotationRad,
+  ships[1].scaleClip
 ]);
 const shipPosBuffer = device.createBuffer({
   label: 'shipPositions',
@@ -297,10 +302,11 @@ const shipShader = device.createShaderModule({
             shipCount: f32  // only a float for consistency
         }
 
-        struct ShipPosition {
+        struct Ship {
             xM: f32,
             yM: f32,
-            rotation: f32
+            rotationRad: f32,
+            scaleClip: f32,
         }
 
         struct VertexOutput {
@@ -328,7 +334,7 @@ const shipShader = device.createShaderModule({
         );
 
         @group(0) @binding(0) var<uniform> metaData: MetaData;
-        @group(0) @binding(1) var<storage, read> shipPositions: array<ShipPosition>;
+        @group(0) @binding(1) var<storage, read> shipPositions: array<Ship>;
         @group(0) @binding(2) var vhTexture: texture_2d<f32>;
         @group(0) @binding(3) var shipTexture: texture_2d<f32>;
         @group(0) @binding(4) var shipHeightTexture: texture_2d<f32>;
@@ -353,27 +359,70 @@ const shipShader = device.createShaderModule({
             return textureLoad(texture, coords, 0);
         }
 
+        fn getRotationMatrix(radsAroundX: f32, radsAroundY: f32, radsAroundZ: f32) -> mat3x3<f32> {
+          let rx = mat3x3(
+            1, 0, 0,
+            0, cos(radsAroundX), -sin(radsAroundX),
+            0, sin(radsAroundX), cos(radsAroundX)
+          );
+          let ry = mat3x3(
+            cos(radsAroundY), 0, sin(radsAroundY),
+            0, 1, 0,
+            -sin(radsAroundY), 0, cos(radsAroundY)
+          );
+          let rz = mat3x3(
+            cos(radsAroundZ), - sin(radsAroundZ), 0,
+            sin(radsAroundZ), cos(radsAroundZ), 0,
+            0, 0, 1
+          );
+          return rx * ry * rz;
+        }
+
+        fn getShipH(shipPosWorldX: f32, shipPosWorldY: f32) -> f32 {
+          let shipPosUv = worldCoordsToUv(vec2f(shipPosWorldX, shipPosWorldY));
+          let h = myTextureSampler_f32(vhTexture, shipPosUv).y;
+          return h;
+        }
+
+        fn getShipPosRotation(shipPosWorldX: f32, shipPosWorldY: f32) -> vec2f {
+          let shipPosUv = worldCoordsToUv(vec2f(shipPosWorldX, shipPosWorldY));
+          let h = myTextureSampler_f32(vhTexture, shipPosUv).y;
+          let h_yp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(0, metaData.deltaY / metaData.heightM)).y;
+          let h_xp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(metaData.deltaX / metaData.heightM, 0)).y;
+          let rotationXRads = atan((h_yp - h) / metaData.deltaY);
+          let rotationYRads = atan((h_xp - h) / metaData.deltaX);
+          return vec2f(rotationXRads, rotationYRads);
+        }
+
         @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOutput {
             let triangleNr: u32 = vertexIndex / 3;
             let triangleOffset: u32 = vertexIndex % 3; 
             let pos = POSITIONS[triangleNr + triangleOffset];
             let uv = UVS[triangleNr + triangleOffset];
 
-            let shipPos = shipPositions[instanceIndex];
-            let transformMatrix = mat3x3<f32>(
-              cos(shipPos.rotation), sin(shipPos.rotation), shipPos.xM,
-              - sin(shipPos.rotation), cos(shipPos.rotation), shipPos.yM,
-              0, 0, 1
+            // ship world pos
+            let ship = shipPositions[instanceIndex];
+            let h = getShipH(ship.xM, ship.yM);
+            let shipWorldPos = vec3f(ship.xM, ship.yM, h);
+
+            // scale
+            let scaled = vec3f(pos * ship.scaleClip, 0.0);
+
+            // rotate
+            let rotationXY = getShipPosRotation(ship.xM, ship.yM);
+            let rotationZ = ship.rotationRad;
+            let rotationMatrix = getRotationMatrix(rotationXY.x, rotationXY.y, rotationZ);
+            let rotated = rotationMatrix * scaled;
+
+            // translate
+            let translated = vec3f(
+              rotated.x + 2.0 * ship.xM / metaData.widthM - 1.0,
+              rotated.y - 2.0 * ship.yM / metaData.heightM + 1.0,
+              h
             );
-            let worldToSceneMatrix = mat3x3<f32>(
-              50.0 * metaData.deltaX / metaData.widthM, 0, 0,
-              0, 50.0 * metaData.deltaY / metaData.heightM, 0,
-              0, 0, 1
-            );
-            let posProjected = worldToSceneMatrix * transformMatrix * vec3f(pos, 1);
 
             var o = VertexOutput();
-            o.pos = vec4f(posProjected.xy, 0, 1);
+            o.pos = vec4f(translated, 1);
             o.uv = uv;
             return o;
         }
@@ -385,13 +434,10 @@ const shipShader = device.createShaderModule({
             var fo = FragmentOutput();
             fo.diffuseColor = shipColor;
             fo.heightMap = waterHeight + shipHeight;
-            // fo.diffuseColor = vec4f(1, 0, 0, 1);
             return fo;
         }
-
   `
 });
-
 
 
 const shipImgResponse = await fetch('./ship.png');
@@ -480,7 +526,7 @@ let i = 0;
 function render() {
   i += 1;
 
-  shipPosArray[0] = 0.5 * widthM * Math.sin(i / 100) + widthM / 2;
+  shipPosArray[0] = 0.5 * widthM * Math.cos(i / 100) + widthM / 2;
   device.queue.writeBuffer(shipPosBuffer, 0, shipPosArray, 0);
 
   // water rendering
@@ -512,7 +558,7 @@ function render() {
   const encoder2 = device.createCommandEncoder();
   const pass2 = encoder2.beginRenderPass({
     colorAttachments: [{
-      loadOp: 'clear', 
+      loadOp: 'load', 
       storeOp: 'store', 
       view: context.getCurrentTexture().createView()
     }, {
