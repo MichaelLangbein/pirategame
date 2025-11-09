@@ -1,8 +1,5 @@
 import { getWebGpuContext } from './lib/utils';
 
-/**
- *
- */
 
 /*****************************************************************************
  * Globals
@@ -29,13 +26,24 @@ const ships = [
   },
 ];
 
-const metaData = {
+const lights = [{
+  xM: widthM / 2,
+  yM: heightM / 2,
+  h: 100
+}];
+
+const metaDataFloats = {
   widthM: widthM, // scene width in m
   heightM: heightM, // scene height in m
   deltaX: widthM / widthPx, // = width / nrPixelsWidth
   deltaY: heightM / heightPx, // = height / nrPixelsHeight
   deltaT: 0.05, // should not be much bigger than 0.01
-  shipCount: ships.length
+}
+
+const metaDataInts = {
+  shipCount: ships.length,
+  lightSourcesCount: lights.length,
+  rayMarcherSteps: 25
 };
 
 
@@ -53,13 +61,18 @@ const { device, context, format } = await getWebGpuContext(canvas);
 const waterShader = device.createShaderModule({
   code: /*wgsl*/ `
 
-        struct MetaData {
+        struct MetaDataFloats {
             widthM: f32,   // scene width in m
             heightM: f32,  // scene height in m
             deltaX: f32,  // = width / nrPixelsWidth
             deltaY: f32,  // = height / nrPixelsHeight
-            deltaT: f32,  // should not be much bigger than 0.01
-            shipCount: f32  // only a float for consistency
+            deltaT: f32  // should not be much bigger than 0.01
+        }
+
+        struct MetaDataInts {
+            shipCount: u32,
+            lightSourcesCount: u32,
+            rayMarcherSteps: u32
         }
 
         struct Ship {
@@ -93,14 +106,15 @@ const waterShader = device.createShaderModule({
             vec2(1.0, 0.0)  // Top-right pos
         );
 
-        @group(0) @binding(0) var<uniform> metaData: MetaData;
-        @group(0) @binding(1) var<storage, read> shipPositions: array<Ship>;
-        @group(0) @binding(2) var vhTexture: texture_2d<f32>;
+        @group(0) @binding(0) var<uniform> metaDataFloats: MetaDataFloats;
+        @group(0) @binding(1) var<uniform> metaDataInts: MetaDataInts;
+        @group(0) @binding(2) var<storage, read> shipPositions: array<Ship>;
+        @group(0) @binding(3) var vhTexture: texture_2d<f32>;
 
         fn worldCoordsToUv(worldCoords: vec2f) -> vec2f {
           return vec2f(
-            worldCoords.x / metaData.widthM,
-            worldCoords.y / metaData.heightM
+            worldCoords.x / metaDataFloats.widthM,
+            worldCoords.y / metaDataFloats.heightM
           );
         }
 
@@ -136,11 +150,11 @@ const waterShader = device.createShaderModule({
 
         @fragment fn fragment(vo: VertexOutput) -> FragmentOutput {
 
-            let dx = metaData.deltaX;
-            let dy = metaData.deltaY;
-            let dt = metaData.deltaT;
-            let width = metaData.widthM;
-            let height = metaData.heightM;
+            let dx = metaDataFloats.deltaX;
+            let dy = metaDataFloats.deltaY;
+            let dt = metaDataFloats.deltaT;
+            let width = metaDataFloats.widthM;
+            let height = metaDataFloats.heightM;
             let delta = worldCoordsToUv(vec2f(dx, dy));
 
             let vh = myTextureSampler(vhTexture, vo.uv);
@@ -163,7 +177,7 @@ const waterShader = device.createShaderModule({
 
 
             // if this is a ship location, create some distortion
-            for (var s: u32 = 0; s < u32(metaData.shipCount); s++) {
+            for (var s: u32 = 0; s < metaDataInts.shipCount; s++) {
                 let shipPosM = shipPositions[s];
                 let shipPosUv = worldCoordsToUv(vec2f(shipPosM.xM, shipPosM.yM));
                 let dir = vo.uv - shipPosUv;
@@ -182,20 +196,31 @@ const waterShader = device.createShaderModule({
     `,
 });
 
-const metaDataArray = new Float32Array([
-  metaData.widthM,
-  metaData.heightM,
-  metaData.deltaX,
-  metaData.deltaY,
-  metaData.deltaT,
-  metaData.shipCount
+const metaDataFloatsArray = new Float32Array([
+  metaDataFloats.widthM,
+  metaDataFloats.heightM,
+  metaDataFloats.deltaX,
+  metaDataFloats.deltaY,
+  metaDataFloats.deltaT,
 ]);
-const metaDataBuffer = device.createBuffer({
-  label: 'metadata',
-  size: metaDataArray.byteLength,
+const metaDataFloatsBuffer = device.createBuffer({
+  label: 'metadataFloats',
+  size: metaDataFloatsArray.byteLength,
   usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
 });
-device.queue.writeBuffer(metaDataBuffer, 0, metaDataArray, 0);
+device.queue.writeBuffer(metaDataFloatsBuffer, 0, metaDataFloatsArray, 0);
+
+const metaDataIntsArray = new Uint32Array([
+  metaDataInts.shipCount,
+  metaDataInts.lightSourcesCount,
+  metaDataInts.rayMarcherSteps,
+]);
+const metaDataIntsBuffer = device.createBuffer({
+  label: 'metadataInts',
+  size: metaDataIntsArray.byteLength,
+  usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+});
+device.queue.writeBuffer(metaDataIntsBuffer, 0, metaDataIntsArray, 0);
 
 const shipPosArray = new Float32Array([
   ships[0].xM,
@@ -252,14 +277,15 @@ const waterBindGroup1 = device.createBindGroup({
   entries: [
     {
       binding: 0,
-      resource: metaDataBuffer,
+      resource: metaDataFloatsBuffer,
     },
+    { binding: 1, resource: metaDataIntsBuffer },
     {
-      binding: 1,
+      binding: 2,
       resource: shipPosBuffer,
     },
     {
-      binding: 2,
+      binding: 3,
       resource: vhTexture1.createView(),
     },
   ],
@@ -270,14 +296,15 @@ const waterBindGroup2 = device.createBindGroup({
   entries: [
     {
       binding: 0,
-      resource: metaDataBuffer,
+      resource: metaDataFloatsBuffer,
     },
+    { binding: 1, resource: metaDataIntsBuffer },
     {
-      binding: 1,
+      binding: 2,
       resource: shipPosBuffer,
     },
     {
-      binding: 2,
+      binding: 3,
       resource: vhTexture2.createView(),
     },
   ],
@@ -293,13 +320,18 @@ const shipShader = device.createShaderModule({
   label: `shipShader`,
   code: /*wgsl*/`
   
-        struct MetaData {
+        struct MetaDataFloats {
             widthM: f32,   // scene width in m
             heightM: f32,  // scene height in m
             deltaX: f32,  // = width / nrPixelsWidth
             deltaY: f32,  // = height / nrPixelsHeight
             deltaT: f32,  // should not be much bigger than 0.01
-            shipCount: f32  // only a float for consistency
+        }
+
+        struct MetaDataInts {
+            shipCount: u32, 
+            lightSourcesCount: u32,
+            rayMarcherSteps: u32,
         }
 
         struct Ship {
@@ -333,16 +365,17 @@ const shipShader = device.createShaderModule({
             vec2(1.0, 0.0)  // Top-right pos
         );
 
-        @group(0) @binding(0) var<uniform> metaData: MetaData;
-        @group(0) @binding(1) var<storage, read> shipPositions: array<Ship>;
-        @group(0) @binding(2) var vhTexture: texture_2d<f32>;
-        @group(0) @binding(3) var shipTexture: texture_2d<f32>;
-        @group(0) @binding(4) var shipHeightTexture: texture_2d<f32>;
+        @group(0) @binding(0) var<uniform> metaDataFloats: MetaDataFloats;
+        @group(0) @binding(1) var<uniform> metaDataInts: MetaDataInts;
+        @group(0) @binding(2) var<storage, read> shipPositions: array<Ship>;
+        @group(0) @binding(3) var vhTexture: texture_2d<f32>;
+        @group(0) @binding(4) var shipTexture: texture_2d<f32>;
+        @group(0) @binding(5) var shipHeightTexture: texture_2d<f32>;
 
         fn worldCoordsToUv(worldCoords: vec2f) -> vec2f {
           return vec2f(
-            worldCoords.x / metaData.widthM,
-            worldCoords.y / metaData.heightM
+            worldCoords.x / metaDataFloats.widthM,
+            worldCoords.y / metaDataFloats.heightM
           );
         }
 
@@ -387,10 +420,10 @@ const shipShader = device.createShaderModule({
         fn getShipPosRotation(shipPosWorldX: f32, shipPosWorldY: f32) -> vec2f {
           let shipPosUv = worldCoordsToUv(vec2f(shipPosWorldX, shipPosWorldY));
           let h = myTextureSampler_f32(vhTexture, shipPosUv).y;
-          let h_yp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(0, metaData.deltaY / metaData.heightM)).y;
-          let h_xp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(metaData.deltaX / metaData.heightM, 0)).y;
-          let rotationXRads = atan((h_yp - h) / metaData.deltaY);
-          let rotationYRads = atan((h_xp - h) / metaData.deltaX);
+          let h_yp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(0, metaDataFloats.deltaY / metaDataFloats.heightM)).y;
+          let h_xp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(metaDataFloats.deltaX / metaDataFloats.heightM, 0)).y;
+          let rotationXRads = atan((h_yp - h) / metaDataFloats.deltaY);
+          let rotationYRads = atan((h_xp - h) / metaDataFloats.deltaX);
           return vec2f(rotationXRads, rotationYRads);
         }
 
@@ -401,28 +434,34 @@ const shipShader = device.createShaderModule({
             let uv = UVS[triangleNr + triangleOffset];
 
             // ship world pos
-            let ship = shipPositions[instanceIndex];
+            let ship = shipPositions[instanceIndex + 0 * metaDataInts.shipCount];
             let h = getShipH(ship.xM, ship.yM);
             let shipWorldPos = vec3f(ship.xM, ship.yM, h);
 
+            // initial vertex pos
+            let vPosClip = vec3f(pos, h);
+
             // scale
-            let scaled = vec3f(pos * ship.scaleClip, 0.0);
+            let scaledClip = vec3f(vPosClip.xy * ship.scaleClip, h);
 
             // rotate
             let rotationXY = getShipPosRotation(ship.xM, ship.yM);
             let rotationZ = ship.rotationRad;
             let rotationMatrix = getRotationMatrix(rotationXY.x, rotationXY.y, rotationZ);
-            let rotated = rotationMatrix * scaled;
+            let rotated = rotationMatrix * scaledClip;
+
+            // perspective 
+            let projected = rotated / (1.0 - rotated.z);
 
             // translate
             let translated = vec3f(
-              rotated.x + 2.0 * ship.xM / metaData.widthM - 1.0,
-              rotated.y - 2.0 * ship.yM / metaData.heightM + 1.0,
-              h
+              projected.x + 2.0 * ship.xM / metaDataFloats.widthM - 1.0,
+              projected.y - 2.0 * ship.yM / metaDataFloats.heightM + 1.0,
+              projected.z
             );
 
             var o = VertexOutput();
-            o.pos = vec4f(translated, 1);
+            o.pos = vec4f(translated, 1.0);
             o.uv = uv;
             return o;
         }
@@ -449,7 +488,7 @@ const shipTexture = device.createTexture({
   size: [100, 100],
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
 });
-device.queue.copyExternalImageToTexture({source: shipBitmap}, {texture: shipTexture}, {width: 100, height: 100});
+device.queue.copyExternalImageToTexture({ source: shipBitmap }, { texture: shipTexture }, { width: 100, height: 100 });
 
 const shipHeightImgResponse = await fetch('./shipHeight.png');
 const heightBlob = await shipHeightImgResponse.blob();
@@ -460,7 +499,7 @@ const shipHeightTexture = device.createTexture({
   size: [100, 100],
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
 });
-device.queue.copyExternalImageToTexture({source: shipHeightBitmap}, {texture: shipHeightTexture}, {width: 100, height: 100});
+device.queue.copyExternalImageToTexture({ source: shipHeightBitmap }, { texture: shipHeightTexture }, { width: 100, height: 100 });
 
 const waterAndShipHeightTexture = device.createTexture({
   format: 'r32float',
@@ -473,7 +512,7 @@ const shipPipeline = device.createRenderPipeline({
   vertex: {
     module: shipShader,
     entryPoint: `vertex`,
-  }, 
+  },
   fragment: {
     module: shipShader,
     targets: [{
@@ -485,38 +524,166 @@ const shipPipeline = device.createRenderPipeline({
 });
 
 const shipBindGroup1 = device.createBindGroup({
-  label: 'shipBindGroup1', 
+  label: 'shipBindGroup1',
   layout: shipPipeline.getBindGroupLayout(0),
   entries: [{
     binding: 0,
-    resource: metaDataBuffer
+    resource: metaDataFloatsBuffer
   }, {
-    binding: 1, resource: shipPosBuffer
+    binding: 1,
+    resource: metaDataIntsBuffer
   }, {
-    binding: 2, resource: vhTexture1.createView(),
+    binding: 2, resource: shipPosBuffer
   }, {
-    binding: 3, resource: shipTexture.createView(),
+    binding: 3, resource: vhTexture1.createView(),
   }, {
-    binding: 4, resource: shipHeightTexture.createView(),
+    binding: 4, resource: shipTexture.createView(),
+  }, {
+    binding: 5, resource: shipHeightTexture.createView(),
   }]
 });
 
 const shipBindGroup2 = device.createBindGroup({
-  label: 'shipBindGroup2', 
+  label: 'shipBindGroup2',
   layout: shipPipeline.getBindGroupLayout(0),
   entries: [{
     binding: 0,
-    resource: metaDataBuffer
+    resource: metaDataFloatsBuffer
   }, {
-    binding: 1, resource: shipPosBuffer
+    binding: 1, resource: metaDataIntsBuffer
   }, {
-    binding: 2, resource: vhTexture2.createView(),
+    binding: 2, resource: shipPosBuffer
   }, {
-    binding: 3, resource: shipTexture.createView(),
+    binding: 3, resource: vhTexture2.createView(),
   }, {
-    binding: 4, resource: shipHeightTexture.createView(),
+    binding: 4, resource: shipTexture.createView(),
+  }, {
+    binding: 5, resource: shipHeightTexture.createView(),
   }]
 });
+
+
+
+
+
+
+/*****************************************************************************
+ * Ray marcher
+ *****************************************************************************/
+
+const rayMarchShader = device.createShaderModule({
+  label: 'rayMarchShader',
+  code: /*wgsl*/`
+
+
+        struct MetaDataFloats {
+            widthM: f32,   // scene width in m
+            heightM: f32,  // scene height in m
+            deltaX: f32,  // = width / nrPixelsWidth
+            deltaY: f32,  // = height / nrPixelsHeight
+            deltaT: f32,  // should not be much bigger than 0.01
+        }
+
+        struct MetaDataInts {
+            shipCount: u32,
+            lightSourcesCount: u32,
+            rayMarcherSteps: u32
+        }
+
+        struct Light {
+            xM: f32,
+            yM: f32,
+            h: f32,
+        }
+
+        struct VertexOutput {
+            @builtin(position) pos: vec4f,
+            @location(0) uv: vec2f
+        }
+
+        struct FragmentOutput {
+            @location(0) color: vec4f
+        }
+
+        const POSITIONS = array<vec2<f32>, 4>(
+            vec2(-1.0, -1.0), // Bottom-left
+            vec2( 1.0, -1.0), // Bottom-right
+            vec2(-1.0,  1.0), // Top-left
+            vec2( 1.0,  1.0)  // Top-right
+        );
+
+        const UVS = array<vec2<f32>, 4>(
+            vec2(0.0, 1.0), // Bottom-left pos
+            vec2(1.0, 1.0), // Bottom-right pos
+            vec2(0.0, 0.0), // Top-left pos
+            vec2(1.0, 0.0)  // Top-right pos
+        );
+
+        @group(0) @binding(0) var<uniform> metaDataFloats: MetaDataFloats;
+        @group(0) @binding(1) var<uniform> metaDataInts: MetaDataInts;
+        @group(0) @binding(2) var textureHeight: texture_2d<f32>;
+        @group(0) @binding(3) var textureDiffuse: texture_2d<f32>;
+        @group(0) @binding(4) var<storage> lightSources: array<Light>;
+
+        // some textures cannot be sampled with 'textureSample', for instance r32f or rgba32f.
+        // so we use 'textureLoad' instead.
+        fn myTextureSampler(texture: texture_2d<f32>, uv: vec2f) -> vec4f {
+            let textureSize = textureDimensions(texture);
+            let coords = vec2<i32>(uv * vec2<f32>(textureSize));
+            return textureLoad(texture, coords, 0);
+        }
+
+        @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> VertexOutput {
+            let triangleNr: u32 = vertexIndex / 3;
+            let triangleOffset: u32 = vertexIndex % 3; 
+            let pos = POSITIONS[triangleNr + triangleOffset];
+            let uv = UVS[triangleNr + triangleOffset];
+            var vo = VertexOutput();
+            vo.pos = vec4f(pos, 0, 1);
+            vo.uv = uv;
+            return vo;
+        }
+
+        @fragment fn fragment(vo: VertexOutput) -> FragmentOutput {
+
+            let height: f32 = myTextureSampler(textureHeight, vo.uv).x;
+            let color: vec4f = myTextureSampler(textureDiffuse, vo.uv);
+
+            var lightness = 1.0;
+            let startPoint = vec3f(vo.uv, height + 0.01);
+            for (var l: u32 = 0; l < metaDataInts.lightSourcesCount; l++) {
+                let lightSource = lightSources[l];
+                let lightSourcePoint = vec3f(lightSource.xM, lightSource.yM, lightSource.h);
+                let direction = lightSourcePoint - startPoint;
+                for (var s: u32 = 0; s < metaDataInts.rayMarcherSteps; s++) {
+                    let wayPoint = startPoint + (f32(s) / f32(metaDataInts.rayMarcherSteps)) * direction;
+                    let terrainHeight = myTextureSampler(textureHeight, wayPoint.xy).x;
+                    if (terrainHeight > wayPoint.z) {
+                        lightness -= (1.0 / f32(metaDataInts.lightSourcesCount));
+                        break;
+                    }
+                }
+            }
+
+
+            var fo = FragmentOutput();
+            fo.color = vec4f(color.xyz * lightness, 1.0);
+
+            for (var l: u32 = 0; l < metaDataInts.lightSourcesCount; l++) {
+                let lightSource = lightSources[l];
+                let lightSourcePoint = vec3f(lightSource.xM, lightSource.yM, lightSource.h);
+                let direction = lightSourcePoint.xy - startPoint.xy;
+                if (length(direction) < 0.01) {
+                  fo.color = vec4f(0, 0, 1, 1);
+                }
+            }
+
+            return fo;
+        }
+
+  `
+});
+
 
 /*****************************************************************************
  * Render loop
@@ -558,18 +725,18 @@ function render() {
   const encoder2 = device.createCommandEncoder();
   const pass2 = encoder2.beginRenderPass({
     colorAttachments: [{
-      loadOp: 'load', 
-      storeOp: 'store', 
+      loadOp: 'load',
+      storeOp: 'store',
       view: context.getCurrentTexture().createView()
     }, {
-      loadOp: 'load', 
-      storeOp: 'store', 
+      loadOp: 'load',
+      storeOp: 'store',
       view: waterAndShipHeightTexture.createView()
     }]
   });
   pass2.setPipeline(shipPipeline);
   pass2.setBindGroup(0, i % 2 === 0 ? shipBindGroup2 : shipBindGroup1);
-  pass2.draw(6, metaData.shipCount);
+  pass2.draw(6, metaDataInts.shipCount);
   pass2.end();
   const command2 = encoder2.finish();
 
