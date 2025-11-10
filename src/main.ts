@@ -1,5 +1,12 @@
 import { getWebGpuContext } from './lib/utils';
 
+/**
+ * TODOs:
+ * - better raymarcher: prevent self intersection, move full pixels
+ * - caustic: water shader, draw from ground texture
+ * - blur shadows
+ * - gameplay
+ */
 
 /*****************************************************************************
  * Globals
@@ -783,7 +790,7 @@ function render() {
   device.queue.writeBuffer(shipPosBuffer, 0, shipPosArray, 0);
   lightSourcesArray[0] = 0.5 * widthM + Math.cos(i / 100) * widthM / 8;
   lightSourcesArray[1] = 0.5 * heightM + Math.sin(i / 100) * heightM / 8;
-  lightSourcesArray[4] = 0.5 * heightM + Math.sin(i / 100) * heightM / 8;
+  lightSourcesArray[4] = 0.5 * heightM + Math.sin(0.5 + i / 80) * heightM / 8;
   device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
 
   // water rendering
