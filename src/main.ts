@@ -12,8 +12,8 @@ import { getWebGpuContext } from './lib/utils';
  * Globals
  *****************************************************************************/
 
-const widthPx = 320;
-const heightPx = 240;
+const widthPx = 240;
+const heightPx = 160;
 const widthM = 75;
 const heightM = 50;
 
@@ -36,7 +36,7 @@ const ships = [
 const lights = [{
   xM: widthM / 2,
   yM: heightM / 2,
-  h: 2.0
+  h: 1.0
 }, {
   xM: widthM / 2,
   yM: heightM / 2,
@@ -511,7 +511,7 @@ const shipTexture = device.createTexture({
 });
 device.queue.copyExternalImageToTexture({ source: shipBitmap }, { texture: shipTexture }, { width: 100, height: 100 });
 
-const shipHeightImgResponse = await fetch('./shipHeight.png');
+const shipHeightImgResponse = await fetch('./shipHeightBlurred.png');
 const heightBlob = await shipHeightImgResponse.blob();
 const shipHeightBitmap = await createImageBitmap(heightBlob, { resizeHeight: 100, resizeWidth: 100 });
 const shipHeightTexture = device.createTexture({
