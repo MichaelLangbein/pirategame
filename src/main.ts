@@ -1,13 +1,5 @@
 import { getWebGpuContext } from './lib/utils';
 
-/**
- * TODOs:
- * - better raymarcher: prevent self intersection, move full pixels
- * - caustic: water shader, draw from ground texture
- * - blur shadows
- * - gameplay
- */
-
 /*****************************************************************************
  * Globals
  *****************************************************************************/
@@ -41,7 +33,7 @@ const lights = [
   {
     xM: widthM / 2,
     yM: heightM / 2,
-    h: 5.0,
+    h: 2.0,
   },
 ];
 
@@ -183,7 +175,7 @@ const waterShader = device.createShaderModule({
 
             // water simulation
             var v2 = v1 + dt * ( h1_xp + h1_xm + h1_yp + h1_ym - 4.0 * h1 ) / (dx * dy);
-            v2 *= 0.999;
+            v2 *= 0.992;
             var h2 = h1 + dt * v2;
 
 
@@ -264,8 +256,8 @@ const vhTexture2 = device.createTexture({
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 
-const waterDiffuseTexture = device.createTexture({
-  label: `waterDiffuseTexture`,
+const waterAndShipsDiffuseTexture = device.createTexture({
+  label: `waterAndShipDiffuseTexture`,
   format: `bgra8unorm`,
   size: [widthPx, heightPx],
   usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
@@ -282,7 +274,7 @@ const waterPipeline = device.createRenderPipeline({
     module: waterShader,
     targets: [
       {
-        format: waterDiffuseTexture.format,
+        format: waterAndShipsDiffuseTexture.format,
       },
       {
         format: vhTexture1.format,
@@ -327,6 +319,202 @@ const waterBindGroup2 = device.createBindGroup({
       resource: vhTexture2.createView(),
     },
   ],
+});
+
+/*****************************************************************************
+ * Refraction shader
+ *****************************************************************************/
+
+const refractionShader = device.createShaderModule({
+  label: `refractionShader`,
+  code: /*wgsl*/ `
+  
+        struct MetaDataFloats {
+            widthM: f32,   // scene width in m
+            heightM: f32,  // scene height in m
+            deltaX: f32,  // = width / nrPixelsWidth
+            deltaY: f32,  // = height / nrPixelsHeight
+            deltaT: f32  // should not be much bigger than 0.01
+        }
+
+        struct MetaDataInts {
+            shipCount: u32,
+            lightSourcesCount: u32,
+            rayMarcherSteps: u32
+        }
+
+        struct VertexOutput {
+            @builtin(position) pos: vec4f,
+            @location(0) uv: vec2f
+        }
+
+        struct FragmentOutput {
+            @location(0) diffuseColor: vec4f,
+        }
+
+        const POSITIONS = array<vec2<f32>, 4>(
+            vec2(-1.0, -1.0), // Bottom-left
+            vec2( 1.0, -1.0), // Bottom-right
+            vec2(-1.0,  1.0), // Top-left
+            vec2( 1.0,  1.0)  // Top-right
+        );
+
+        const UVS = array<vec2<f32>, 4>(
+            vec2(0.0, 1.0), // Bottom-left pos
+            vec2(1.0, 1.0), // Bottom-right pos
+            vec2(0.0, 0.0), // Top-left pos
+            vec2(1.0, 0.0)  // Top-right pos
+        );
+
+        @group(0) @binding(0) var<uniform> metaDataFloats: MetaDataFloats;
+        @group(0) @binding(1) var<uniform> metaDataInts: MetaDataInts;
+        @group(0) @binding(2) var vhTexture: texture_2d<f32>;
+        @group(0) @binding(3) var seaFloorTexture: texture_2d<f32>;
+
+        fn worldCoordsToUv(worldCoords: vec2f) -> vec2f {
+          return vec2f(
+            worldCoords.x / metaDataFloats.widthM,
+            worldCoords.y / metaDataFloats.heightM
+          );
+        }
+
+        // some textures cannot be sampled with 'textureSample', for instance r32f or rgba32f.
+        // so we use 'textureLoad' instead.
+        fn myTextureSampler(texture: texture_2d<f32>, uv: vec2f) -> vec4f {
+            let textureSize = textureDimensions(texture);
+            let coords = vec2<i32>(uv * vec2<f32>(textureSize));
+            return textureLoad(texture, coords, 0);
+        }
+
+        fn interpolateColor(h: f32) -> vec4f {
+            let hmin = 0.0;
+            let hmax = 2.0;
+            let colorMin = vec4f(24.0 / 255.0, 38.0 / 255.0, 99.0 / 255.0, 1); // vec4f(0, 0.25, 1, 1);
+            let colorMax = vec4f(209.0 / 255.0, 253.0 / 255.0, 255.0 / 255.0, 1);
+            let dir = colorMax - colorMin;
+            let fraction = (h - hmin) / (hmax - hmin);
+            let interpolated = colorMin + fraction * dir;
+            return interpolated;
+        }
+
+        @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+            let triangleNr: u32 = vertexIndex / 3;
+            let triangleOffset: u32 = vertexIndex % 3; 
+            let pos = POSITIONS[triangleNr + triangleOffset];
+            let uv = UVS[triangleNr + triangleOffset];
+            var o = VertexOutput();
+            o.pos = vec4f(pos, 0, 1);
+            o.uv = uv;
+            return o;
+        }
+
+        @fragment fn fragment(vo: VertexOutput) -> FragmentOutput {
+
+            let dx = metaDataFloats.deltaX / metaDataFloats.widthM;
+            let dy = metaDataFloats.deltaY / metaDataFloats.heightM;
+            let vh = myTextureSampler(vhTexture, vo.uv);
+
+            let vh_xp = myTextureSampler(vhTexture, vo.uv + vec2f(dx, 0));
+            let vh_yp = myTextureSampler(vhTexture, vo.uv + vec2f(0, dy));
+
+            let dhdx = (vh_xp.y - vh.y) / dx;
+            let dhdy = (vh_yp.y - vh.y) / dy;
+
+            let seaFloorSamplePoint = vo.uv + vec2f(dhdx, dhdy) * 0.02;
+            // let seaFloorColor = myTextureSampler(seaFloorTexture, seaFloorSamplePoint);
+            let seaFloorColor = textureLoad(
+              seaFloorTexture, 
+              vec2<i32>(seaFloorSamplePoint * vec2f(100, 100)),
+              0
+            );
+            let seaSurfaceColor = interpolateColor(vh.y);
+
+            var color = max(seaFloorColor, seaSurfaceColor);
+            color.x = color.x + f32(metaDataInts.shipCount) * 0;
+
+            var fo = FragmentOutput();
+            fo.diffuseColor = color;
+            return fo;
+        }
+  `,
+});
+
+const refractionPipeline = device.createRenderPipeline({
+  layout: 'auto',
+  vertex: {
+    module: refractionShader,
+    entryPoint: `vertex`,
+  },
+  fragment: {
+    module: refractionShader,
+    entryPoint: `fragment`,
+    targets: [
+      {
+        format: waterAndShipsDiffuseTexture.format,
+      },
+    ],
+  },
+});
+
+const seaFloorImgResponse = await fetch('./seaFloor.png');
+const seaFloorBlob = await seaFloorImgResponse.blob();
+const seaFloorBitmap = await createImageBitmap(seaFloorBlob, { resizeHeight: heightPx, resizeWidth: widthPx });
+const seaFloorTexture = device.createTexture({
+  label: 'seaFloorTexture',
+  format: 'rgba8unorm',
+  size: [widthPx, heightPx],
+  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+});
+device.queue.copyExternalImageToTexture(
+  { source: seaFloorBitmap },
+  { texture: seaFloorTexture },
+  { width: 100, height: 100 }
+);
+
+const refractionBindGroup1 = device.createBindGroup({
+  label: `refractionBindGroup`,
+  entries: [
+    {
+      binding: 0,
+      resource: metaDataFloatsBuffer,
+    },
+    {
+      binding: 1,
+      resource: metaDataIntsBuffer,
+    },
+    {
+      binding: 2,
+      resource: vhTexture1.createView(),
+    },
+    {
+      binding: 3,
+      resource: seaFloorTexture.createView(),
+    },
+  ],
+  layout: refractionPipeline.getBindGroupLayout(0),
+});
+
+const refractionBindGroup2 = device.createBindGroup({
+  label: `refractionBindGroup`,
+  entries: [
+    {
+      binding: 0,
+      resource: metaDataFloatsBuffer,
+    },
+    {
+      binding: 1,
+      resource: metaDataIntsBuffer,
+    },
+    {
+      binding: 2,
+      resource: vhTexture2.createView(),
+    },
+    {
+      binding: 3,
+      resource: seaFloorTexture.createView(),
+    },
+  ],
+  layout: refractionPipeline.getBindGroupLayout(0),
 });
 
 /*****************************************************************************
@@ -525,13 +713,6 @@ device.queue.copyExternalImageToTexture(
 
 const allRockingShipsHeightTexture = device.createTexture({
   format: 'r32float',
-  size: [widthPx, heightPx],
-  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-});
-
-const waterAndShipsDiffuseTexture = device.createTexture({
-  label: `waterAndShipDiffuseTexture`,
-  format: `bgra8unorm`,
   size: [widthPx, heightPx],
   usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 });
@@ -848,7 +1029,7 @@ function render() {
 
   // water rendering
 
-  const encoder = device.createCommandEncoder();
+  const encoder = device.createCommandEncoder({ label: 'water' });
   const pass = encoder.beginRenderPass({
     label: `waterRenderPass`,
     colorAttachments: [
@@ -869,6 +1050,25 @@ function render() {
   pass.draw(6);
   pass.end();
   const command = encoder.finish();
+
+  // refraction rendering
+
+  const encoder4 = device.createCommandEncoder({ label: 'refrac' });
+  const pass4 = encoder4.beginRenderPass({
+    label: `refractionRenderPass`,
+    colorAttachments: [
+      {
+        loadOp: 'load',
+        storeOp: 'store',
+        view: waterAndShipsDiffuseTexture.createView(),
+      },
+    ],
+  });
+  pass4.setPipeline(refractionPipeline);
+  pass4.setBindGroup(0, i % 2 === 0 ? refractionBindGroup2 : refractionBindGroup1);
+  pass4.draw(6);
+  pass4.end();
+  const command4 = encoder4.finish();
 
   // ship rendering
 
@@ -912,7 +1112,7 @@ function render() {
   pass3.end();
   const command3 = encoder3.finish();
 
-  device.queue.submit([command, command2, command3]);
+  device.queue.submit([command, command4, command2, command3]);
 }
 
 function loop() {
