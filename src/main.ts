@@ -17,7 +17,6 @@ const heightPx = 160;
 const widthM = 75;
 const heightM = 50;
 
-
 const ships = [
   {
     xM: widthM / 2,
@@ -26,22 +25,25 @@ const ships = [
     scaleClip: 0.15,
   },
   {
-    xM: 3 * widthM / 4,
+    xM: (3 * widthM) / 4,
     yM: heightM / 4,
     rotationRad: Math.PI / 4,
     scaleClip: 0.1,
   },
 ];
 
-const lights = [{
-  xM: widthM / 2,
-  yM: heightM / 2,
-  h: 1.0
-}, {
-  xM: widthM / 2,
-  yM: heightM / 2,
-  h: 5.0
-}];
+const lights = [
+  {
+    xM: widthM / 2,
+    yM: heightM / 2,
+    h: 1.0,
+  },
+  {
+    xM: widthM / 2,
+    yM: heightM / 2,
+    h: 5.0,
+  },
+];
 
 const metaDataFloats = {
   widthM: widthM, // scene width in m
@@ -49,21 +51,19 @@ const metaDataFloats = {
   deltaX: widthM / widthPx, // = width / nrPixelsWidth
   deltaY: heightM / heightPx, // = height / nrPixelsHeight
   deltaT: 0.05, // should not be much bigger than 0.01
-}
+};
 
 const metaDataInts = {
   shipCount: ships.length,
   lightSourcesCount: lights.length,
-  rayMarcherSteps: 100
+  rayMarcherSteps: 100,
 };
-
 
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
 canvas.width = widthPx;
 canvas.height = heightPx;
 
 const { device, context, format } = await getWebGpuContext(canvas);
-
 
 /*****************************************************************************
  * Water shader
@@ -241,7 +241,7 @@ const shipPosArray = new Float32Array([
   ships[1].xM,
   ships[1].yM,
   ships[1].rotationRad,
-  ships[1].scaleClip
+  ships[1].scaleClip,
 ]);
 const shipPosBuffer = device.createBuffer({
   label: 'shipPositions',
@@ -268,7 +268,7 @@ const waterDiffuseTexture = device.createTexture({
   label: `waterDiffuseTexture`,
   format: `bgra8unorm`,
   size: [widthPx, heightPx],
-  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 });
 
 const waterPipeline = device.createRenderPipeline({
@@ -329,15 +329,13 @@ const waterBindGroup2 = device.createBindGroup({
   ],
 });
 
-
-
 /*****************************************************************************
  * Ship shader
  *****************************************************************************/
 
 const shipShader = device.createShaderModule({
   label: `shipShader`,
-  code: /*wgsl*/`
+  code: /*wgsl*/ `
   
         struct MetaDataFloats {
             widthM: f32,   // scene width in m
@@ -496,9 +494,8 @@ const shipShader = device.createShaderModule({
             fo.heightMap = shipHeight;
             return fo;
         }
-  `
+  `,
 });
-
 
 const shipImgResponse = await fetch('./ship.png');
 const blob = await shipImgResponse.blob();
@@ -507,7 +504,7 @@ const shipTexture = device.createTexture({
   label: 'shipTexture',
   format: 'rgba8unorm',
   size: [100, 100],
-  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 device.queue.copyExternalImageToTexture({ source: shipBitmap }, { texture: shipTexture }, { width: 100, height: 100 });
 
@@ -518,21 +515,25 @@ const shipHeightTexture = device.createTexture({
   label: 'shipHeightTexture',
   format: 'rgba8unorm',
   size: [100, 100],
-  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
+  usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
 });
-device.queue.copyExternalImageToTexture({ source: shipHeightBitmap }, { texture: shipHeightTexture }, { width: 100, height: 100 });
+device.queue.copyExternalImageToTexture(
+  { source: shipHeightBitmap },
+  { texture: shipHeightTexture },
+  { width: 100, height: 100 }
+);
 
 const allRockingShipsHeightTexture = device.createTexture({
   format: 'r32float',
   size: [widthPx, heightPx],
-  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 });
 
 const waterAndShipsDiffuseTexture = device.createTexture({
   label: `waterAndShipDiffuseTexture`,
   format: `bgra8unorm`,
   size: [widthPx, heightPx],
-  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING
+  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
 });
 
 const shipPipeline = device.createRenderPipeline({
@@ -544,66 +545,90 @@ const shipPipeline = device.createRenderPipeline({
   },
   fragment: {
     module: shipShader,
-    targets: [{
-      format: waterAndShipsDiffuseTexture.format,
-      blend: {
-        color: {
+    targets: [
+      {
+        format: waterAndShipsDiffuseTexture.format,
+        blend: {
+          color: {
             operation: 'add',
             srcFactor: 'src-alpha',
             dstFactor: 'one-minus-src-alpha',
-        },
-        alpha: {
+          },
+          alpha: {
             operation: 'add',
             srcFactor: 'one', // or 'src-alpha'
             dstFactor: 'one-minus-src-alpha', // or 'zero'
+          },
         },
-      }
-    }, {
-      format: allRockingShipsHeightTexture.format
-    }]
-  }
+      },
+      {
+        format: allRockingShipsHeightTexture.format,
+      },
+    ],
+  },
 });
 
 const shipBindGroup1 = device.createBindGroup({
   label: 'shipBindGroup1',
   layout: shipPipeline.getBindGroupLayout(0),
-  entries: [{
-    binding: 0,
-    resource: metaDataFloatsBuffer
-  }, {
-    binding: 1,
-    resource: metaDataIntsBuffer
-  }, {
-    binding: 2, resource: shipPosBuffer
-  }, {
-    binding: 3, resource: vhTexture1.createView(),
-  }, {
-    binding: 4, resource: shipTexture.createView(),
-  }, {
-    binding: 5, resource: shipHeightTexture.createView(),
-  }]
+  entries: [
+    {
+      binding: 0,
+      resource: metaDataFloatsBuffer,
+    },
+    {
+      binding: 1,
+      resource: metaDataIntsBuffer,
+    },
+    {
+      binding: 2,
+      resource: shipPosBuffer,
+    },
+    {
+      binding: 3,
+      resource: vhTexture1.createView(),
+    },
+    {
+      binding: 4,
+      resource: shipTexture.createView(),
+    },
+    {
+      binding: 5,
+      resource: shipHeightTexture.createView(),
+    },
+  ],
 });
 
 const shipBindGroup2 = device.createBindGroup({
   label: 'shipBindGroup2',
   layout: shipPipeline.getBindGroupLayout(0),
-  entries: [{
-    binding: 0,
-    resource: metaDataFloatsBuffer
-  }, {
-    binding: 1, resource: metaDataIntsBuffer
-  }, {
-    binding: 2, resource: shipPosBuffer
-  }, {
-    binding: 3, resource: vhTexture2.createView(),
-  }, {
-    binding: 4, resource: shipTexture.createView(),
-  }, {
-    binding: 5, resource: shipHeightTexture.createView(),
-  }]
+  entries: [
+    {
+      binding: 0,
+      resource: metaDataFloatsBuffer,
+    },
+    {
+      binding: 1,
+      resource: metaDataIntsBuffer,
+    },
+    {
+      binding: 2,
+      resource: shipPosBuffer,
+    },
+    {
+      binding: 3,
+      resource: vhTexture2.createView(),
+    },
+    {
+      binding: 4,
+      resource: shipTexture.createView(),
+    },
+    {
+      binding: 5,
+      resource: shipHeightTexture.createView(),
+    },
+  ],
 });
-
-
 
 /*****************************************************************************
  * Ray marcher
@@ -611,7 +636,7 @@ const shipBindGroup2 = device.createBindGroup({
 
 const rayMarchShader = device.createShaderModule({
   label: 'rayMarchShader',
-  code: /*wgsl*/`
+  code: /*wgsl*/ `
 
 
         struct MetaDataFloats {
@@ -694,39 +719,50 @@ const rayMarchShader = device.createShaderModule({
             let height: f32 = getTerrainHeight(vo.uv);
             let color: vec4f = myTextureSampler(diffuseTexture, vo.uv);
 
-            var lightness = 1.0;
-            let startPoint = vec3f(vo.uv, height + 0.01);
+            /*------ All values in pixels ---------*/
+            let widthPx = metaDataFloats.widthM / metaDataFloats.deltaX;
+            let heightPx = metaDataFloats.heightM / metaDataFloats.deltaY;
+
+            let maxTravelDistance = 200.0;
+            var lightnessTotal = 0.0;
+            let targetPoint = vec3f(vo.uv.x * widthPx, vo.uv.y * heightPx, height);
             for (var l: u32 = 0; l < metaDataInts.lightSourcesCount; l++) {
                 let lightSource = lightSources[l];
-                let lightSourcePoint = vec3f(lightSource.xM / metaDataFloats.widthM, lightSource.yM / metaDataFloats.heightM, lightSource.h);
-                let direction = lightSourcePoint - startPoint;
-                for (var s: u32 = 0; s < metaDataInts.rayMarcherSteps; s++) {
-                    let wayPoint = startPoint + (f32(s) / f32(metaDataInts.rayMarcherSteps)) * direction;
-                    let terrainHeight = getTerrainHeight(wayPoint.xy);
-                    if (terrainHeight > wayPoint.z) {
-                        lightness -= (1.0 / f32(metaDataInts.lightSourcesCount));
-                        break;
+                let lightSourcePoint = vec3f(lightSource.xM / metaDataFloats.deltaX, lightSource.yM / metaDataFloats.deltaY, lightSource.h);
+                let direction = targetPoint - lightSourcePoint;
+                let maxDist = max(abs(direction.x), abs(direction.y));
+                var distanceTraveled = length(direction);
+                if (maxDist > 0.0) {
+                    let delta = direction / maxDist;
+                    for (var i: u32 = 0; i < u32(maxDist); i++) {
+                        let wayPoint = lightSourcePoint + f32(i) * delta;
+                        let terrainHeight = getTerrainHeight(vec2f(wayPoint.x / widthPx, wayPoint.y / heightPx));
+                        if (terrainHeight > wayPoint.z) {
+                          distanceTraveled = maxTravelDistance;
+                          break;
+                        }
                     }
                 }
+                let lightnessDecayed = (maxTravelDistance - distanceTraveled) / maxTravelDistance;
+                lightnessTotal += lightnessDecayed * lightnessDecayed;
             }
-            lightness = max(lightness, 0.2);
 
             var fo = FragmentOutput();
-            fo.color = vec4f(color.xyz * lightness, 1.0);
-            // fo.color = vec4f(height, height, height, 1);
+            fo.color = vec4f(color.xyz * lightnessTotal, 1.0);
+            /*---------------*/
 
             for (var l: u32 = 0; l < metaDataInts.lightSourcesCount; l++) {
                 let lightSource = lightSources[l];
-                let lightSourcePoint = vec3f(lightSource.xM / metaDataFloats.widthM, lightSource.yM / metaDataFloats.heightM, lightSource.h);
-                let direction = lightSourcePoint.xy - startPoint.xy;
-                if (length(direction) < 0.01) {
+                let lightSourcePoint = vec3f(lightSource.xM / metaDataFloats.deltaX, lightSource.yM / metaDataFloats.deltaY, lightSource.h);
+                let direction = targetPoint.xy - lightSourcePoint.xy;
+                if (length(direction) < 2.5) {
                   fo.color = vec4f(0, 0, 1, 1);
                 }
             }
 
             return fo;
         }
-  `
+  `,
 });
 
 const rayMarcherPipeline = device.createRenderPipeline({
@@ -734,47 +770,64 @@ const rayMarcherPipeline = device.createRenderPipeline({
   layout: 'auto',
   vertex: {
     module: rayMarchShader,
-    entryPoint: `vertex`
+    entryPoint: `vertex`,
   },
   fragment: {
     module: rayMarchShader,
     entryPoint: `fragment`,
-    targets: [{
-      format
-    }]
-  }
+    targets: [
+      {
+        format,
+      },
+    ],
+  },
 });
 
 const lightSourcesArray = new Float32Array([
-  lights[0].xM, lights[0].yM, lights[0].h,
-  lights[1].xM, lights[1].yM, lights[1].h,
+  lights[0].xM,
+  lights[0].yM,
+  lights[0].h,
+  lights[1].xM,
+  lights[1].yM,
+  lights[1].h,
 ]);
 const lightSourcesBuffer = device.createBuffer({
   label: `lightSourcesBuffer`,
   size: lightSourcesArray.byteLength,
-  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE
+  usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
 });
 device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
 
 const rayMarcherBindGroup = device.createBindGroup({
   label: `rayMarcherBindGroup`,
   layout: rayMarcherPipeline.getBindGroupLayout(0),
-  entries: [{
-    binding: 0, resource: metaDataFloatsBuffer
-  }, {
-    binding: 1, resource: metaDataIntsBuffer
-  }, {
-    binding: 2, resource: allRockingShipsHeightTexture.createView(),
-  }, {
-    binding: 3, resource: waterAndShipsDiffuseTexture.createView(),
-  }, {
-    binding: 4, resource: lightSourcesBuffer
-  }, {
-    binding: 5, resource: vhTexture1.createView()
-  }]
+  entries: [
+    {
+      binding: 0,
+      resource: metaDataFloatsBuffer,
+    },
+    {
+      binding: 1,
+      resource: metaDataIntsBuffer,
+    },
+    {
+      binding: 2,
+      resource: allRockingShipsHeightTexture.createView(),
+    },
+    {
+      binding: 3,
+      resource: waterAndShipsDiffuseTexture.createView(),
+    },
+    {
+      binding: 4,
+      resource: lightSourcesBuffer,
+    },
+    {
+      binding: 5,
+      resource: vhTexture1.createView(),
+    },
+  ],
 });
-
-
 
 /*****************************************************************************
  * Render loop
@@ -788,9 +841,9 @@ function render() {
 
   shipPosArray[0] = 0.5 * widthM * Math.cos(i / 100) + widthM / 2;
   device.queue.writeBuffer(shipPosBuffer, 0, shipPosArray, 0);
-  lightSourcesArray[0] = 0.5 * widthM + Math.cos(i / 100) * widthM / 8;
-  lightSourcesArray[1] = 0.5 * heightM + Math.sin(i / 100) * heightM / 8;
-  lightSourcesArray[4] = 0.5 * heightM + Math.sin(0.5 + i / 80) * heightM / 8;
+  lightSourcesArray[0] = 0.5 * widthM + (Math.cos(i / 100) * widthM) / 8;
+  lightSourcesArray[1] = 0.5 * heightM + (Math.sin(i / 100) * heightM) / 8;
+  lightSourcesArray[4] = 0.5 * heightM + (Math.sin(0.5 + i / 80) * heightM) / 8;
   device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
 
   // water rendering
@@ -802,7 +855,7 @@ function render() {
       {
         loadOp: 'clear',
         storeOp: 'store',
-        view: waterAndShipsDiffuseTexture.createView()
+        view: waterAndShipsDiffuseTexture.createView(),
       },
       {
         loadOp: 'load',
@@ -817,21 +870,23 @@ function render() {
   pass.end();
   const command = encoder.finish();
 
-
   // ship rendering
 
   const encoder2 = device.createCommandEncoder();
   const pass2 = encoder2.beginRenderPass({
     label: `shipsRenderPass`,
-    colorAttachments: [{
-      loadOp: 'load',
-      storeOp: 'store',
-      view: waterAndShipsDiffuseTexture.createView()
-    }, {
-      loadOp: 'load',
-      storeOp: 'store',
-      view: allRockingShipsHeightTexture.createView()
-    }]
+    colorAttachments: [
+      {
+        loadOp: 'load',
+        storeOp: 'store',
+        view: waterAndShipsDiffuseTexture.createView(),
+      },
+      {
+        loadOp: 'load',
+        storeOp: 'store',
+        view: allRockingShipsHeightTexture.createView(),
+      },
+    ],
   });
   pass2.setPipeline(shipPipeline);
   pass2.setBindGroup(0, i % 2 === 0 ? shipBindGroup2 : shipBindGroup1);
@@ -839,16 +894,17 @@ function render() {
   pass2.end();
   const command2 = encoder2.finish();
 
-
   // light rendering
 
   const encoder3 = device.createCommandEncoder();
   const pass3 = encoder3.beginRenderPass({
-    colorAttachments: [{
-      loadOp: 'clear',
-      storeOp: 'store',
-      view: context.getCurrentTexture().createView()
-    }]
+    colorAttachments: [
+      {
+        loadOp: 'clear',
+        storeOp: 'store',
+        view: context.getCurrentTexture().createView(),
+      },
+    ],
   });
   pass3.setPipeline(rayMarcherPipeline);
   pass3.setBindGroup(0, rayMarcherBindGroup);
