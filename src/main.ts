@@ -91,8 +91,7 @@ const waterShader = device.createShaderModule({
         }
 
         struct FragmentOutput {
-            @location(0) diffuseColor: vec4f,
-            @location(1) vhOutput: vec4f 
+            @location(0) vhOutput: vec4f 
         }
 
         const POSITIONS = array<vec2<f32>, 4>(
@@ -127,17 +126,6 @@ const waterShader = device.createShaderModule({
             let textureSize = textureDimensions(texture);
             let coords = vec2<i32>(uv * vec2<f32>(textureSize));
             return textureLoad(texture, coords, 0);
-        }
-
-        fn interpolateColor(h: f32) -> vec4f {
-            let hmin = 0.0;
-            let hmax = 2.0;
-            let colorMin = vec4f(24.0 / 255.0, 38.0 / 255.0, 99.0 / 255.0, 1); // vec4f(0, 0.25, 1, 1);
-            let colorMax = vec4f(209.0 / 255.0, 253.0 / 255.0, 255.0 / 255.0, 1);
-            let dir = colorMax - colorMin;
-            let fraction = (h - hmin) / (hmax - hmin);
-            let interpolated = colorMin + fraction * dir;
-            return interpolated;
         }
 
         @vertex fn vertex(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
@@ -192,7 +180,6 @@ const waterShader = device.createShaderModule({
 
             var fo = FragmentOutput();
             fo.vhOutput = vec4f(v2, h2, 0, 1.0);
-            fo.diffuseColor = interpolateColor(h2);
             return fo;
         }
 
@@ -273,9 +260,6 @@ const waterPipeline = device.createRenderPipeline({
   fragment: {
     module: waterShader,
     targets: [
-      {
-        format: waterAndShipsDiffuseTexture.format,
-      },
       {
         format: vhTexture1.format,
       },
@@ -1034,11 +1018,6 @@ function render() {
     label: `waterRenderPass`,
     colorAttachments: [
       {
-        loadOp: 'clear',
-        storeOp: 'store',
-        view: waterAndShipsDiffuseTexture.createView(),
-      },
-      {
         loadOp: 'load',
         storeOp: 'store',
         view: i % 2 === 0 ? vhTexture2.createView() : vhTexture1.createView(),
@@ -1058,7 +1037,7 @@ function render() {
     label: `refractionRenderPass`,
     colorAttachments: [
       {
-        loadOp: 'load',
+        loadOp: 'clear',
         storeOp: 'store',
         view: waterAndShipsDiffuseTexture.createView(),
       },
