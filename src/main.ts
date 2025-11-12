@@ -405,12 +405,7 @@ const refractionShader = device.createShaderModule({
             let dhdy = (vh_yp.y - vh.y) / dy;
 
             let seaFloorSamplePoint = vo.uv + vec2f(dhdx, dhdy) * 0.02;
-            // let seaFloorColor = myTextureSampler(seaFloorTexture, seaFloorSamplePoint);
-            let seaFloorColor = textureLoad(
-              seaFloorTexture, 
-              vec2<i32>(seaFloorSamplePoint * vec2f(100, 100)),
-              0
-            );
+            let seaFloorColor = myTextureSampler(seaFloorTexture, seaFloorSamplePoint);
             let seaSurfaceColor = interpolateColor(vh.y);
 
             var color = max(seaFloorColor, seaSurfaceColor);
@@ -440,19 +435,23 @@ const refractionPipeline = device.createRenderPipeline({
   },
 });
 
-const seaFloorImgResponse = await fetch('./seaFloor.png');
+const seaFloorImgResponse = await fetch('./seaFloor.jpg');
 const seaFloorBlob = await seaFloorImgResponse.blob();
-const seaFloorBitmap = await createImageBitmap(seaFloorBlob, { resizeHeight: heightPx, resizeWidth: widthPx });
+const seaFloorBitmap = await createImageBitmap(seaFloorBlob, {
+  resizeHeight: heightPx,
+  resizeWidth: widthPx,
+  imageOrientation: 'from-image',
+});
 const seaFloorTexture = device.createTexture({
   label: 'seaFloorTexture',
   format: 'rgba8unorm',
-  size: [widthPx, heightPx],
+  size: [seaFloorBitmap.width, seaFloorBitmap.height],
   usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
 });
 device.queue.copyExternalImageToTexture(
   { source: seaFloorBitmap },
   { texture: seaFloorTexture },
-  { width: 100, height: 100 }
+  { width: seaFloorBitmap.width, height: seaFloorBitmap.height }
 );
 
 const refractionBindGroup1 = device.createBindGroup({
