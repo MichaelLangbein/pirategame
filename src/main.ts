@@ -606,12 +606,25 @@ const shipShader = device.createShaderModule({
         }
 
         fn getShipPosRotation(shipPosWorldX: f32, shipPosWorldY: f32) -> vec2f {
+
           let shipPosUv = worldCoordsToUv(vec2f(shipPosWorldX, shipPosWorldY));
           let h = myTextureSampler_f32(vhTexture, shipPosUv).y;
           let h_yp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(0, metaDataFloats.deltaY / metaDataFloats.heightM)).y;
           let h_xp = myTextureSampler_f32(vhTexture, shipPosUv + vec2f(metaDataFloats.deltaX / metaDataFloats.heightM, 0)).y;
-          let rotationXRads = atan((h_yp - h) / metaDataFloats.deltaY);
-          let rotationYRads = atan((h_xp - h) / metaDataFloats.deltaX);
+          let h_ym = myTextureSampler_f32(vhTexture, shipPosUv - vec2f(0, metaDataFloats.deltaY / metaDataFloats.heightM)).y;
+          let h_xm = myTextureSampler_f32(vhTexture, shipPosUv - vec2f(metaDataFloats.deltaX / metaDataFloats.heightM, 0)).y;
+
+          let dhdy_p = (h_yp - h) / metaDataFloats.deltaY;
+          let dhdx_p = (h_xp - h) / metaDataFloats.deltaX;
+          let dhdy_m = (h - h_xm) / metaDataFloats.deltaY;
+          let dhdx_m = (h - h_ym) / metaDataFloats.deltaX;
+
+          let dhdx = (dhdx_p + dhdx_m) / 2.0;
+          let dhdy = (dhdy_p + dhdy_m) / 2.0;
+
+          let rotationXRads = atan(dhdy);
+          let rotationYRads = atan(dhdx);
+          
           return vec2f(rotationXRads, rotationYRads);
         }
 
@@ -1001,17 +1014,31 @@ const rayMarcherBindGroup = device.createBindGroup({
  * Render loop
  *****************************************************************************/
 
+function updateShipPositions(i: number) {
+  shipPosArray[0] = 0.6 * widthM * Math.cos(0.2 + i / 200) + widthM / 2;
+  shipPosArray[1] = 0.3 * heightM * Math.sin(0.2 + i / 200) + heightM / 2;
+  shipPosArray[2] = Math.PI + i / 200;
+  shipPosArray[4] = 0.02 * widthM * Math.cos(0.2 + i / 350) + widthM / 2;
+  shipPosArray[5] = 0.01 * heightM * Math.sin(0.2 + i / 350) + heightM / 4;
+  shipPosArray[6] = Math.PI + i / 350;
+}
+
+function updateLightPositions(i: number) {
+  lightSourcesArray[0] = 0.5 * widthM + (Math.cos(i / 100) * widthM) / 8;
+  lightSourcesArray[1] = 0.5 * heightM + (Math.sin(i / 100) * heightM) / 8;
+  lightSourcesArray[3] = 0.5 * widthM + (Math.sin(0.5 + i / 80) * widthM) / 3;
+  lightSourcesArray[4] = 0.5 * heightM + (Math.sin(0.5 + i / 80) * heightM) / 3;
+}
+
 let i = 0;
 function render() {
   i += 1;
 
   // updating buffers
 
-  shipPosArray[0] = 0.5 * widthM * Math.cos(i / 100) + widthM / 2;
+  updateShipPositions(i);
   device.queue.writeBuffer(shipPosBuffer, 0, shipPosArray, 0);
-  lightSourcesArray[0] = 0.5 * widthM + (Math.cos(i / 100) * widthM) / 8;
-  lightSourcesArray[1] = 0.5 * heightM + (Math.sin(i / 100) * heightM) / 8;
-  lightSourcesArray[4] = 0.5 * heightM + (Math.sin(0.5 + i / 80) * heightM) / 8;
+  updateLightPositions(i);
   device.queue.writeBuffer(lightSourcesBuffer, 0, lightSourcesArray, 0);
 
   // water rendering
