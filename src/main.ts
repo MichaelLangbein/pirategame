@@ -48,7 +48,7 @@ const metaDataFloats = {
 const metaDataInts = {
   shipCount: ships.length,
   lightSourcesCount: lights.length,
-  rayMarcherSteps: 100,
+  rayMarcherSteps: 60,
 };
 
 const canvas = document.querySelector('#canvas') as HTMLCanvasElement;
@@ -894,11 +894,15 @@ const rayMarchShader = device.createShaderModule({
                 let lightSource = lightSources[l];
                 let lightSourcePoint = vec3f(lightSource.xM / metaDataFloats.deltaX, lightSource.yM / metaDataFloats.deltaY, lightSource.h);
                 let direction = targetPoint - lightSourcePoint;
-                let maxDist = max(abs(direction.x), abs(direction.y));
+                var maxSteps = max(abs(direction.x), abs(direction.y));
                 var distanceTraveled = length(direction);
-                if (maxDist > 0.0) {
-                    let delta = direction / maxDist;
-                    for (var i: u32 = 0; i < u32(maxDist); i++) {
+                if (maxSteps > 0.0) {
+                    if (maxSteps > f32(metaDataInts.rayMarcherSteps)) {
+                      // if we'd have to take too many steps, stretch out the distance per step  
+                      maxSteps = f32(metaDataInts.rayMarcherSteps);
+                    }
+                    let delta = direction / maxSteps;
+                    for (var i: u32 = 0; i < u32(maxSteps); i++) {
                         let wayPoint = lightSourcePoint + f32(i) * delta;
                         let terrainHeight = getTerrainHeight(vec2f(wayPoint.x / widthPx, wayPoint.y / heightPx));
                         if (terrainHeight > wayPoint.z) {
